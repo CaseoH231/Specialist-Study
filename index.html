@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Specialist Study</title>
+  <meta name="description" content="Photos of your Specialist Maths work, sorted into topics automatically, with notes underneath.">
+  <meta name="theme-color" content="#1c2547">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <script defer src="vendor/katex/katex.min.js"></script>
+  <script defer src="vendor/katex/auto-render.min.js"></script>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="no-ai">
+  <header class="appbar">
+    <button id="nav-btn" aria-label="Show topics" aria-expanded="false">☰</button>
+    <a class="brand" href="./"><b>Specialist</b></a>
+    <input id="msearch" type="search" placeholder="Search photos…" aria-label="Search your photos">
+  </header>
+  <div class="shell">
+    <aside id="side">
+      <a class="brand" href="./"><img src="icons/icon.svg" alt="" width="38" height="38"><div><h1>Specialist Study</h1><small id="sub"></small></div></a>
+      <input id="search" type="search" placeholder="Search your photos…  ( / )" aria-label="Search your photos">
+      <nav id="topics" aria-label="Topics"></nav>
+      <div class="side-tools">
+        <button id="btn-upload"><span>⤒</span>Upload photos</button>
+        <button id="btn-install" hidden><span>⤓</span>Install app</button>
+        <details class="more">
+          <summary><span>⋯</span>More</summary>
+          <div class="menu">
+            <button id="btn-owner">I’m the owner…</button>
+            <button id="btn-refresh">Check for new photos &amp; notes</button>
+            <button id="btn-device">This device &amp; AI features</button>
+          </div>
+        </details>
+      </div>
+    </aside>
+    <main id="main"></main>
+  </div>
+  <div class="scrim" id="scrim"></div>
+  <nav class="tabbar" aria-label="Quick links">
+    <button data-tab="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
+    <button data-tab="topics"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Topics</button>
+    <button data-tab="upload"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8a2 2 0 0 1 2-2h2l2-2h4l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg>Upload</button>
+    <button data-tab="ask" class="ai-only"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-8l-5 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>Ask</button>
+  </nav>
+  <input id="file-pick" type="file" accept="image/*" multiple hidden>
+  <button id="bot-btn" class="ai-only" aria-label="Open the helper"><span>✦</span> Ask</button>
+  <section id="bot" hidden aria-label="Helper">
+    <div class="bot-head"><b>✦ Helper</b><small>Changes only happen when you press “Do it”</small><button id="bot-close" aria-label="Close">✕</button></div>
+    <div id="bot-msgs" aria-live="polite"></div>
+    <form id="bot-form"><textarea id="bot-input" rows="2" placeholder="e.g. move the induction photos into Proof…"></textarea><button class="primary" aria-label="Send">➤</button></form>
+  </section>
+  <div id="viewer" hidden>
+    <div class="v-bar"><span id="v-title"></span><span class="grow"></span>
+      <button id="v-zoom" aria-label="Zoom">＋</button><button id="v-close" aria-label="Close">✕</button></div>
+    <div class="v-stage" id="v-stage"><img id="v-img" alt=""></div>
+    <button class="v-nav prev" id="v-prev" aria-label="Previous photo">‹</button>
+    <button class="v-nav next" id="v-next" aria-label="Next photo">›</button>
+  </div>
+  <dialog id="dlg"></dialog>
+  <div id="toast" role="status"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
