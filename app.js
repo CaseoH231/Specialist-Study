@@ -6,6 +6,7 @@
 //     Sunday notes job – sees the same thing.
 //   • Everyone else (friends): they see the owner's library, read-only, and can add photos of their own.
 //     Theirs stay on their device only (IndexedDB), never on the server.
+import { loadCourse, courseHtml, bindCourse, courseCount } from './course.js';
 import { applyOps, emptyLibrary, topicOf, photoOf, kids, ancestors, pathOf, below, treeOrder, outline, formatNotes, COLORS } from './lib.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -24,7 +25,7 @@ const passcode = () => store.get(K.pass, '') || '';
 let server = store.get(K.lib) || emptyLibrary();   // the owner's library (a saved copy, refreshed from the Worker)
 let mine = store.get(K.mine) || { topics: [], photos: [] }; // this device's own photos (friends)
 let who = null;                                     // /api/whoami
-let current = HOME, photoId = null, query = '';
+let current = HOME, photoId = null, query = '', courseOpen = false;
 const openFolders = new Set(store.get(K.open, []));
 const localUrls = new Map();                        // id → object URL of a photo kept on this device
 
@@ -279,7 +280,8 @@ function render() {
   if (current !== HOME && !T(current)) current = HOME;
   if (photoId && !P(photoId)) photoId = null;
   $('#sub').textContent = `${plural(V.photos.length, 'photo')} · ${plural(V.topics.length, 'topic')}`;
-  $('#topics').innerHTML = `<button class="topic home ${current === HOME && !query && !photoId ? 'on' : ''}" data-topic="${HOME}"><span class="ico">⌂</span><span class="nm">Home</span></button>
+  $('#topics').innerHTML = `<button class="topic home ${current === HOME && !query && !photoId && !courseOpen ? 'on' : ''}" data-topic="${HOME}"><span class="ico">⌂</span><span class="nm">Home</span></button>
+    <button class="topic home ${courseOpen ? 'on' : ''}" data-course><span class="ico">📘</span><span class="nm">Course</span><span class="n">${courseCount() || ''}</span></button>
     <div class="nav-label">Topics</div>${navTree()}<button class="topic add" id="add-topic">+ New topic</button>`;
   const main = $('#main');
   if (query) {
@@ -287,7 +289,8 @@ function render() {
     const hits = V.photos.filter((p) => [p.title, pathOf(V, T(p.topic)), p.notes].join(' ').toLowerCase().includes(q));
     main.innerHTML = `<div class="bar"><h2>Search</h2></div><p class="lead">${plural(hits.length, 'photo')} matching “${esc(query)}”</p>
       ${hits.length ? `<div class="pgrid">${hits.map(pcard).join('')}</div>` : '<p class="empty">Nothing found.</p>'}`;
-  } else if (photoId) main.innerHTML = photoPage();
+  } else if (courseOpen) { main.innerHTML = courseHtml(isOwner()); bindCourse(main, { isOwner, callApi, toast, redraw: render }); return; }
+  else if (photoId) main.innerHTML = photoPage();
   else if (current === HOME) main.innerHTML = home();
   else main.innerHTML = topicPage();
   drawMaths(main);
@@ -302,6 +305,8 @@ function home() {
   return `<div class="hello"><div><p class="eyebrow">${hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening'}</p>
       <h2>Specialist Maths</h2><p class="lead">${facts}</p></div>
       <div class="tools"><button class="primary" data-act="upload">⤒ Upload photos</button></div></div>
+    <a class="c-link" href="#/course"><span class="c-ico">📘</span><span><b>Study design &amp; work plan</b>
+      <small>${courseCount() ? `${courseCount()} document${courseCount() === 1 ? '' : 's'} – what you’re learning this year, and when` : 'What you’re learning this year, and when'}</small></span></a>
     ${ps.length ? `<h3 class="sect-h">Recently added</h3><div class="strip">${ps.slice(-10).reverse().map(pcard).join('')}</div>` : ''}
     <h3 class="sect-h">Topics</h3>
     ${V.topics.length ? `<div class="tgrid">${kids(V).map(folderCard).join('')}<button class="tcard add" data-act="new-topic"><h3>+ New topic</h3><span class="tn">Or let uploads make them</span></button></div>`
@@ -421,6 +426,7 @@ $('#main').addEventListener('click', async (ev) => {
 $('#topics').addEventListener('click', async (ev) => {
   const tog = ev.target.closest('[data-toggle]');
   if (tog) { ev.stopPropagation(); const id = tog.dataset.toggle; openFolders.has(id) ? openFolders.delete(id) : openFolders.add(id); store.set(K.open, [...openFolders]); return render(); }
+  if (ev.target.closest('[data-course]')) return go('#/course');
   if (ev.target.closest('#add-topic')) { const n = prompt('Name of the new topic:'); if (n) await newTopic(n, null); return; }
   const b = ev.target.closest('[data-topic]'); if (b) go(b.dataset.topic === HOME ? '#/' : `#/topic/${b.dataset.topic}`);
 });
@@ -430,7 +436,7 @@ function go(hash) { if (location.hash === hash || (hash === '#/' && !location.ha
 function route() {
   const [, kind, raw] = location.hash.match(/^#\/(topic|photo)\/(.+)$/) || [];
   const id = raw && decodeURIComponent(raw);
-  query = ''; $('#search').value = ''; $('#msearch').value = ''; photoId = null;
+  query = ''; $('#search').value = ''; $('#msearch').value = ''; photoId = null; courseOpen = location.hash === '#/course';
   if (kind === 'photo' && P(id)) { photoId = id; current = P(id).topic; }
   else if (kind === 'topic' && T(id)) { current = id; if (kids(V, id).length) openFolders.add(id); }
   else current = HOME;
@@ -521,7 +527,7 @@ $('#btn-install').onclick = async () => { if (!installEvent) return; installEven
 document.addEventListener('click', (ev) => { document.querySelectorAll('details.more[open]').forEach((d) => { if (!d.contains(ev.target)) d.removeAttribute('open'); }); });
 
 // ---------- search & keys ----------
-const onSearch = (ev) => { query = ev.target.value.trim(); photoId = null; render(); };
+const onSearch = (ev) => { query = ev.target.value.trim(); photoId = null; courseOpen = false; render(); };
 $('#search').addEventListener('input', onSearch); $('#msearch').addEventListener('input', onSearch);
 document.addEventListener('keydown', (ev) => {
   if (!$('#viewer').hidden) {
@@ -541,7 +547,7 @@ function setNav(open) {
   document.body.classList.toggle('nav-open', open);
   $('#nav-btn').setAttribute('aria-expanded', String(open));
   document.querySelectorAll('.tabbar [data-tab]').forEach((b) => b.classList.toggle('on',
-    open ? b.dataset.tab === 'topics' : b.dataset.tab === 'home' && current === HOME && !photoId && !query));
+    open ? b.dataset.tab === 'topics' : b.dataset.tab === 'home' && current === HOME && !photoId && !query && !courseOpen));
 }
 $('#nav-btn').onclick = () => setNav(!document.body.classList.contains('nav-open'));
 $('#scrim').onclick = () => setNav(false);
@@ -561,5 +567,6 @@ saveMine(); V = view(); route();
 loadLocalPhotos().then(() => render());
 checkWho().then(() => render());
 refresh().then(route);
+loadCourse().then(() => render());
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 window.__app = { get server() { return server; }, get mine() { return mine; } }; // for the tests

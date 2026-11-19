@@ -6,12 +6,15 @@
 //   GET  /photo/<id>.jpg – a saved photo
 //   POST /api/sort       – which topic a photo belongs in (owner – AI, free Workers AI allowance)
 //   POST /api/assistant  – the helper chat (owner – AI)
+//   /api/course, /course/<file> – the study design and work plan (worker/course.js)
 // Writes always need the APP_PASSCODE, because they change what everyone sees.
 import { access } from './access.js';
 import { readText, readBytes, write, toBase64, GitHubError } from './github.js';
 import { applyOps, emptyLibrary } from '../lib.js';
 import { sort } from './sort.js';
 import { assistant } from './assistant.js';
+import { course } from './course.js';
+import { REPO } from './github.js';
 
 export const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 const LIBRARY = 'data/library.json';
@@ -103,6 +106,7 @@ export async function handleApi(request, env) {
   const { pathname } = new URL(request.url);
   const pic = pathname.match(/^\/photo\/(p-[a-z0-9]{6,30})\.jpg$/);
   if (pic) return photo(request, env, pic[1]);
+  if (pathname === '/api/course' || pathname.startsWith('/course/')) return course(request, env, REPO);
   if (pathname === '/api/library') return library(env);
   if (pathname === '/api/change') return request.method === 'POST' ? change(request, env) : json({ error: 'method' }, 405);
   if (pathname === '/api/upload') return request.method === 'POST' ? upload(request, env) : json({ error: 'method' }, 405);
