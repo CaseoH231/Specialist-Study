@@ -30,6 +30,8 @@ const openFolders = new Set(store.get(K.open, []));
 const localUrls = new Map();                        // id → object URL of a photo kept on this device
 
 const isOwner = () => !!passcode() || !!(who?.owner && who?.locked);
+// The AI features (sorting, helper): when the Worker allows this device, or there's a passcode that unlocks them.
+const aiOk = () => !!who?.ai && (!!who.owner || !!who.hasPasscode);
 const isMine = (id) => String(id).startsWith('my-');
 // Everything shown: the owner's library plus this device's own photos.
 function view() {
@@ -111,7 +113,7 @@ async function refresh({ quiet = true } = {}) {
 }
 async function checkWho() {
   try { const r = await fetch('api/whoami', { headers: { 'x-passcode': passcode() } }); who = r.ok ? await r.json() : null; } catch { who = null; }
-  document.body.classList.toggle('no-ai', !(who?.ai && isOwner()));
+  document.body.classList.toggle('no-ai', !aiOk());
   $('#btn-owner').textContent = passcode() ? 'Forget my passcode on this device' : 'I’m the owner…';
 }
 
@@ -135,11 +137,14 @@ async function change(ops, { quiet = false } = {}) {
   if (!quiet) toast('Saved ✓');
   return true;
 }
+// An op belongs to this device's own copy if the thing it changes is theirs (ids starting "my-") –
+// even when it moves that thing into one of the owner's topics.
 function isMineOp(o) {
-  const ids = [o.topic, o.photo?.id ?? o.photo, o.id, o.parent].filter(Boolean);
   if (o.type === 'add_topic') return isMine(o.id);
   if (o.type === 'add_photo') return isMine(o.photo.id);
-  return ids.length > 0 && isMine(ids[0]);
+  if (o.type === 'add_path') return !isOwner();
+  if (/_photo$/.test(o.type)) return isMine(o.photo);
+  return isMine(o.topic);
 }
 
 // ---------- photos: shrink before saving ----------
@@ -176,6 +181,7 @@ async function upload(files, hint) {
         ${r.state === 'ok' ? `<input data-title="${i}" value="${esc(r.title)}" aria-label="Title">
           <select data-topic="${i}" aria-label="Topic">${topicOptions(r.topic, { ownerOnly: false })}<option value="__new">+ New topic…</option></select>` : ''}</div></div>`).join('')}</div></div>
       <div class="dlg-foot"><span class="grow"></span><button class="primary" id="up-done" ${done ? '' : 'disabled'}>Done</button></div>`, 'small');
+    $('#up-done').onclick = finish;
   };
   draw();
   for (const r of rows) {
@@ -202,17 +208,30 @@ async function upload(files, hint) {
       } else {
         await idbPut(r.id, big.blob);
         localUrls.set(r.id, URL.createObjectURL(big.blob));
+        if (!hint && aiOk()) {
+          r.status = 'Sorting…'; draw();
+          const small = await shrink(r.file, 1024);
+          const { res, data } = await callApi('api/sort', { image: small.b64, topics: outline({ topics: V.topics, photos: [] }) }, { askPass: false });
+          if (res?.ok && data.path?.length) {
+            // Find the topics by name (yours or the owner's), making any that are missing as your own.
+            const lib = { topics: [...structuredClone(server.topics), ...mine.topics], photos: [] };
+            const op = { type: 'add_path', path: data.path, ids: [rid('my-t'), rid('my-t')] };
+            applyOps(lib, [op, { type: 'add_photo', photo: { id: 'p-probe0', topic: '@path' } }]);
+            mine.topics = lib.topics.filter((t) => isMine(t.id));
+            r.topic = lib.photos[0]?.topic; if (data.title) r.title = data.title;
+            V = view();
+          }
+        }
         if (!r.topic || !T(r.topic)) r.topic = current !== HOME && T(current) ? current : ensureMyPhotos();
         mine.photos.push({ id: r.id, topic: r.topic, title: r.title, added: new Date().toISOString().slice(0, 10), w: big.w, h: big.h });
         saveMine();
-        r.status = 'Saved on this device';
+        r.status = `Saved on this device in ${pathOf(V, T(r.topic))}`;
       }
       r.state = 'ok'; r.saved = { title: r.title, topic: r.topic };
     } catch (err) { r.state = 'bad'; r.status = `Not saved: ${err.message}`; }
     V = view(); render(); draw();
   }
-  dlg.onclick = null;
-  dlg.addEventListener('change', async function onChange(ev) {
+  dlg.onchange = async (ev) => { // one handler per upload (replaces the last one)
     const i = ev.target.dataset.topic ?? ev.target.dataset.title; if (i == null) return;
     const r = rows[+i];
     if (ev.target.dataset.title != null) r.title = ev.target.value.trim() || r.title;
@@ -220,8 +239,8 @@ async function upload(files, hint) {
       const name = prompt('Name of the new topic:'); const id = name && await newTopic(name, null);
       if (id) r.topic = id; draw();
     } else r.topic = ev.target.value;
-  });
-  $('#up-done').onclick = async () => {
+  };
+  async function finish() {
     const ops = [];
     rows.filter((r) => r.state === 'ok').forEach((r) => {
       if (r.title !== r.saved.title) ops.push({ type: 'rename_photo', photo: r.id, title: r.title });
@@ -232,7 +251,7 @@ async function upload(files, hint) {
     const first = rows.find((r) => r.state === 'ok');
     if (first && rows.filter((r) => r.state === 'ok').length === 1) go(`#/photo/${first.id}`);
     else if (first) go(`#/topic/${P(first.id)?.topic}`);
-  };
+  }
 }
 function ensureMyPhotos() {
   if (!mine.topics.some((t) => t.id === 'my-photos')) mine.topics.push({ id: 'my-photos', name: 'My photos', color: '#0f766e' });

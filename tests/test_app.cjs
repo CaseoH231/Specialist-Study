@@ -87,6 +87,20 @@ const BASE = 'http://localhost:8767/';
   check('friend: it’s still there after a reload', await f.$eval('.shot img', (i) => i.src.startsWith('blob:') && i.naturalWidth > 100).catch(() => false));
   await f.evaluate(() => document.querySelector('[data-act="delete-photo"]').click()); await f.waitForTimeout(400);
   check('friend: can remove their own photo', (await f.evaluate(() => window.__app.mine.photos.length)) === 0);
+  // Choosing topics in the upload list, then Done (this once did nothing after making a new topic).
+  await f.goto(BASE); await f.waitForSelector('#main .hello');
+  await f.setInputFiles('#file-pick', shots);
+  await f.waitForSelector('#up-done:not([disabled])');
+  const owners = await f.$eval('select[data-topic="0"]', (s) => [...s.options].find((o) => o.textContent.includes('Complex numbers')).value);
+  await f.selectOption('select[data-topic="0"]', owners);
+  await f.selectOption('select[data-topic="1"]', '__new');   // the prompt answers "pw", so a topic called "pw"
+  await f.waitForFunction(() => [...document.querySelectorAll('select[data-topic="1"] option')].some((o) => o.selected && o.textContent.trim() === 'pw'));
+  await f.click('#up-done'); await f.waitForTimeout(500);
+  const mineNow = await f.evaluate(() => window.__app.mine);
+  const pwTopic = mineNow.topics.find((t) => t.name === 'pw');
+  check('friend: Done puts each photo in the topic chosen (an owner topic, and a new one)', !!pwTopic && mineNow.photos.length === 2
+    && mineNow.photos[0].topic === owners && mineNow.photos[1].topic === pwTopic.id && !(await f.$('dialog[open]')));
+  check('friend: the helper button shows when the site has a passcode to unlock it', await f.$eval('#bot-btn', (b) => getComputedStyle(b).display !== 'none'));
 
   // ---- a phone ----
   const ph = await (await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: 'block' })).newPage();
