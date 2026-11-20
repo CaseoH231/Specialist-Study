@@ -114,7 +114,7 @@ async function refresh({ quiet = true } = {}) {
 async function checkWho() {
   try { const r = await fetch('api/whoami', { headers: { 'x-passcode': passcode() } }); who = r.ok ? await r.json() : null; } catch { who = null; }
   document.body.classList.toggle('no-ai', !aiOk());
-  $('#btn-owner').textContent = passcode() ? 'Forget my passcode on this device' : 'I’m the owner…';
+  $('#btn-owner').textContent = passcode() ? 'Log out (owner)' : 'Log in as owner…';
 }
 
 // Change things. The owner's changes are saved to GitHub; a friend's go to their own copy.
@@ -298,7 +298,7 @@ function folderCard(t) {
 function render() {
   if (current !== HOME && !T(current)) current = HOME;
   if (photoId && !P(photoId)) photoId = null;
-  $('#sub').textContent = `${plural(V.photos.length, 'photo')} · ${plural(V.topics.length, 'topic')}`;
+  $('#sub').textContent = `${plural(V.photos.length, 'photo')} · ${plural(V.topics.length, 'topic')}${passcode() ? ' · 🔑 Owner' : ''}`;
   $('#topics').innerHTML = `<button class="topic home ${current === HOME && !query && !photoId && !courseOpen ? 'on' : ''}" data-topic="${HOME}"><span class="ico">⌂</span><span class="nm">Home</span></button>
     <button class="topic home ${courseOpen ? 'on' : ''}" data-course><span class="ico">📘</span><span class="nm">Course</span><span class="n">${courseCount() || ''}</span></button>
     <div class="nav-label">Topics</div>${navTree()}<button class="topic add" id="add-topic">+ New topic</button>`;
@@ -525,11 +525,18 @@ $('#bot-msgs').addEventListener('click', (ev) => {
 $('#btn-upload').onclick = () => pickPhotos(current !== HOME && !photoId ? current : null);
 $('#btn-refresh').onclick = () => refresh({ quiet: false });
 $('#btn-owner').onclick = async () => {
-  if (passcode()) { if (confirm('Forget the passcode on this device? It will then work like a friend’s copy.')) { store.set(K.pass, ''); await checkWho(); render(); toast('Passcode forgotten.'); } return; }
-  const p = prompt('Your passcode:'); if (!p) return;
+  // Log out – e.g. after making changes on someone else's laptop: it goes back to a normal copy.
+  if (passcode()) {
+    if (!confirm('Log out of owner mode on this device?\n\nIt goes back to a normal copy: it still shows your photos and notes, but can’t change them.')) return;
+    store.set(K.pass, ''); chat = []; store.set(K.chat, []);
+    await checkWho(); render(); toast('Logged out ✓ – this is a normal copy again');
+    return;
+  }
+  const p = prompt('Owner passcode:\n\n(Log out again when you’re done on someone else’s device.)'); if (!p) return;
   store.set(K.pass, p.trim());
-  const { res, data } = await callApi('api/change', { ops: [] }, { askPass: false });
-  if (res?.status === 400) { await checkWho(); render(); toast('Owner mode on ✓ – uploads now go to your shared library.'); }
+  // A passcode check that changes nothing (the server checks the passcode first, then finds nothing to do).
+  const { res, data } = await callApi('api/course', { kind: 'design', action: 'check' }, { askPass: false });
+  if (res?.status === 400) { await checkWho(); render(); toast('Logged in as owner ✓ – uploads and changes now go to your shared library'); }
   else { store.set(K.pass, ''); toast(problem(res, data)); }
 };
 $('#btn-device').onclick = async () => {

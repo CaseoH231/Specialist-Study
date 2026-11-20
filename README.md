@@ -18,7 +18,7 @@ Live at **https://specialist-study.adrian11jonker.workers.dev** – installable 
 | `APP_PASSCODE` | Your passcode – needed to upload or change anything |
 | `OWNER_IPS` | Optional: your home address(es) for the AI features (the app shows the value under ⋯ More → This device) |
 
-Then on your laptop: ⋯ More → **I'm the owner…** and enter the passcode once.
+Then on your laptop: ⋯ More → **Log in as owner…** and enter the passcode once. On someone else's laptop, use ⋯ More → **Log out (owner)** when you're done.
 
 ## Files
 
