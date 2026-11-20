@@ -119,12 +119,14 @@ async function checkWho() {
 
 // Change things. The owner's changes are saved to GitHub; a friend's go to their own copy.
 async function change(ops, { quiet = false } = {}) {
+  let skipped = 0;
   const forMine = ops.filter((o) => isMineOp(o)), forServer = ops.filter((o) => !isMineOp(o));
   if (forMine.length) {
     // The owner's topics are included (read-only) so their own photos and sub-topics can go inside them.
     const lib = { topics: [...structuredClone(server.topics), ...mine.topics], photos: mine.photos };
     for (const o of forMine) if (o.type === 'delete_photo') { idbDel(o.photo).catch(() => {}); }
-    applyOps(lib, forMine); mine = { topics: lib.topics.filter((t) => isMine(t.id)), photos: lib.photos }; saveMine();
+    const r = applyOps(lib, forMine); skipped += r.skipped.length;
+    mine = { topics: lib.topics.filter((t) => isMine(t.id)), photos: lib.photos }; saveMine();
   }
   if (forServer.length) {
     if (!isOwner()) { toast('Only the owner can change their photos.'); return false; }
@@ -132,10 +134,12 @@ async function change(ops, { quiet = false } = {}) {
     const { res, data, cancelled } = await callApi('api/change', { ops: forServer });
     if (cancelled || !res?.ok) { toast(cancelled ? 'Not saved.' : `Not saved: ${problem(res, data)}`); await refresh(); return false; }
     server = data.library; store.set(K.lib, server);
+    skipped += (data.skipped || []).length;
   }
   V = view(); render();
-  if (!quiet) toast('Saved ✓');
-  return true;
+  if (skipped) toast(skipped === ops.length ? 'Nothing could be changed – something it refers to no longer exists.' : `Saved ✓ (${skipped} change${skipped === 1 ? '' : 's'} couldn’t be made)`);
+  else if (!quiet) toast('Saved ✓');
+  return skipped < ops.length;
 }
 // An op belongs to this device's own copy if the thing it changes is theirs (ids starting "my-") –
 // even when it moves that thing into one of the owner's topics.
@@ -466,22 +470,90 @@ window.addEventListener('hashchange', route);
 
 // ---------- helper chat ----------
 let chat = store.get(K.chat, []);
-const describe = (a) => {
-  const tn = (id) => T(id)?.name || keyNames[id] || '?', pn = (id) => `“${P(id)?.title || '?'}”`;
-  return { add_topic: `New topic “${a.name}”${a.parent ? ` inside ${tn(a.parent)}` : ''}`, rename_topic: `Rename ${tn(a.topic)} to “${a.name}”`,
-    move_topic: `Move ${tn(a.topic)} ${a.parent ? `into ${tn(a.parent)}` : 'to the top level'}`, delete_topic: `Delete the topic ${tn(a.topic)} (its photos move up)`,
-    move_photo: `Move ${pn(a.photo)} to ${tn(a.topic)}`, rename_photo: `Rename ${pn(a.photo)} to “${a.title}”`, delete_photo: `Delete ${pn(a.photo)}` }[a.type] || a.type;
-};
-let keyNames = {};
+// The helper's suggestions → real changes. The AI may name a topic by its id ("t-abc", "[t-abc]"), a key it made
+// ("new-1"), its name ("Calculus") or a path ("Calculus › Chain rule"), and a photo by its id or title – all are
+// understood. A topic it moves things into that doesn't exist yet is made. Returns { ops, lines } – lines say in
+// words what will happen (or what couldn't be found).
+const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+const cleanRef = (x) => String(x ?? '').trim().replace(/^[\[(“"']+|[\])”"']+$/g, '').trim();
+function planActions(actions) {
+  const ops = [], lines = [], made = []; // made: topics this plan creates { id, name, parent }
+  const all = () => [...V.topics, ...made];
+  const byId = (id) => all().find((t) => t.id === id);
+  const name = (id) => byId(id)?.name || '?';
+  const keys = {};
+  const newId = (parent) => (!isOwner() || (parent && isMine(parent)) ? rid('my-t') : rid('t-'));
+  const child = (parent, n) => all().find((t) => (t.parent || null) === (parent || null) && sameName(t.name, n));
+  function topic(ref, { create = false } = {}) {
+    const r = cleanRef(ref); if (!r) return null;
+    if (keys[r.toLowerCase()]) return keys[r.toLowerCase()];
+    if (byId(r)) return r;
+    const parts = r.split(/\s*(?:›|>|\/|»)\s*/).filter(Boolean);
+    let at = null, ok = true;                       // a path from the top: "Calculus › Chain rule"
+    for (const n of parts) { const t = child(at, n); if (!t) { ok = false; break; } at = t.id; }
+    if (ok && at) return at;
+    const any = all().filter((t) => sameName(t.name, parts[parts.length - 1])); // a name anywhere
+    if (any.length) return any[0].id;
+    if (!create) return null;
+    at = null;                                       // not there: make it (and any missing parents)
+    for (const n of parts) {
+      const t = child(at, n);
+      if (t) { at = t.id; continue; }
+      const id = newId(at); made.push({ id, name: n, parent: at });
+      ops.push({ type: 'add_topic', id, name: n, parent: at }); lines.push(`New topic “${n}”${at ? ` inside ${name(at)}` : ''}`);
+      at = id;
+    }
+    return at;
+  }
+  function photo(ref) {
+    const r = cleanRef(ref); if (!r) return null;
+    if (P(r)) return r;
+    return V.photos.find((p) => sameName(p.title, r))?.id || null;
+  }
+  const pt = (id) => `“${P(id)?.title}”`;
+  for (const a of actions || []) {
+    if (a.type === 'open') continue;
+    if (a.type === 'add_topic') {
+      const parent = a.parent ? topic(a.parent, { create: true }) : null;
+      const have = child(parent, a.name);
+      const id = have ? have.id : newId(parent);
+      if (!have) { made.push({ id, name: a.name, parent }); ops.push({ type: 'add_topic', id, name: a.name, parent }); lines.push(`New topic “${a.name}”${parent ? ` inside ${name(parent)}` : ''}`); }
+      if (a.key) keys[cleanRef(a.key).toLowerCase()] = id;
+      keys[String(a.name).trim().toLowerCase()] = id;
+      continue;
+    }
+    if (/_photo$/.test(a.type)) {
+      const id = photo(a.photo);
+      if (!id) { lines.push(`✕ Couldn’t find the photo “${cleanRef(a.photo)}”`); continue; }
+      if (a.type === 'move_photo') {
+        const to = topic(a.topic, { create: true });
+        if (!to) { lines.push(`✕ No topic given for ${pt(id)}`); continue; }
+        if (P(id).topic === to) { lines.push(`${pt(id)} is already in ${name(to)}`); continue; }
+        ops.push({ type: 'move_photo', photo: id, topic: to }); lines.push(`Move ${pt(id)} to ${name(to)}`);
+      } else if (a.type === 'rename_photo') { ops.push({ type: 'rename_photo', photo: id, title: a.title }); lines.push(`Rename ${pt(id)} to “${a.title}”`); }
+      else { ops.push({ type: 'delete_photo', photo: id }); lines.push(`Delete ${pt(id)}`); }
+      continue;
+    }
+    const t = topic(a.topic);
+    if (!t) { lines.push(`✕ Couldn’t find the topic “${cleanRef(a.topic)}”`); continue; }
+    if (a.type === 'rename_topic') { ops.push({ type: 'rename_topic', topic: t, name: a.name }); lines.push(`Rename ${name(t)} to “${a.name}”`); }
+    else if (a.type === 'move_topic') {
+      const parent = a.parent ? topic(a.parent, { create: true }) : null;
+      ops.push({ type: 'move_topic', topic: t, parent }); lines.push(`Move ${name(t)} ${parent ? `into ${name(parent)}` : 'to the top level'}`);
+    } else if (a.type === 'delete_topic') { ops.push({ type: 'delete_topic', topic: t }); lines.push(`Delete the topic ${name(t)} (its photos move up)`); }
+  }
+  return { ops, lines };
+}
 function renderChat() {
-  keyNames = {};
-  chat.forEach((m) => (m.actions || []).forEach((a) => { if (a.type === 'add_topic' && a.key) keyNames[a.key] = a.name; }));
   $('#bot-msgs').innerHTML = (chat.length ? '' : `<div class="msg assistant"><div class="bubble bot-hello">Hi! Ask me where something is, or to move photos and tidy topics. I’ll suggest the changes and you press “Do it”.</div>
     <div class="chips">${['Which topics have no notes yet?', 'Move everything in Unsorted to the right topics', 'Make a Proof topic and put induction inside it'].map((q) =>
       `<button class="chip ask" data-ask="${esc(q)}">${esc(q)}</button>`).join('')}</div></div>`) + chat.map((m, i) => {
     const acts = (m.actions || []).filter((a) => a.type !== 'open');
+    const plan = m.done ? { lines: m.lines || [], ops: [] } : planActions(acts);
+    const can = m.done || plan.ops.length > 0;
     return `<div class="msg ${m.role}"><div class="bubble">${esc(m.content)}</div>${acts.length ? `<div class="proposal ${m.done ? 'done' : ''}"><b>${m.done ? 'Done' : 'Suggested changes'}</b>
-      <ul>${acts.map((a) => `<li>${esc(describe(a))}</li>`).join('')}</ul>${m.done ? '' : `<button class="primary" data-do="${i}">Do it</button> <button class="link" data-skip="${i}">No thanks</button>`}</div>` : ''}</div>`;
+      <ul>${plan.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>${m.done ? '' : can ? `<button class="primary" data-do="${i}">Do it</button> <button class="link" data-skip="${i}">No thanks</button>`
+        : '<button class="link" data-skip="' + i + '">OK</button>'}</div>` : ''}</div>`;
   }).join('');
   $('#bot-msgs').scrollTop = 1e9;
 }
@@ -497,15 +569,10 @@ async function askHelper(text) {
   if (open) go(open.photo && P(open.photo) ? `#/photo/${open.photo}` : T(open.topic) ? `#/topic/${open.topic}` : location.hash);
 }
 async function doActions(i) {
-  const m = chat[i]; const map = {}, ops = [];
-  const id = (x) => map[x] || x;
-  for (const a of m.actions || []) {
-    if (a.type === 'add_topic') { const parent = id(a.parent || '') || null; map[a.key || a.name] = (parent && isMine(parent)) || !isOwner() ? rid('my-t') : rid('t-'); ops.push({ type: 'add_topic', id: map[a.key || a.name], name: a.name, parent }); }
-    else if (a.type === 'move_topic') ops.push({ type: 'move_topic', topic: id(a.topic), parent: id(a.parent || '') || null });
-    else if (a.type === 'move_photo') ops.push({ type: 'move_photo', photo: a.photo, topic: id(a.topic) });
-    else if (a.type !== 'open') ops.push({ ...a });
-  }
-  if (await change(ops)) { m.done = true; store.set(K.chat, chat); renderChat(); }
+  const m = chat[i];
+  const plan = planActions((m.actions || []).filter((a) => a.type !== 'open'));
+  if (!plan.ops.length) return toast('Nothing to change.');
+  if (await change(plan.ops)) { m.done = true; m.lines = plan.lines.filter((l) => !l.startsWith('✕')); store.set(K.chat, chat); renderChat(); }
 }
 function toggleHelper(open = !document.body.classList.contains('bot-open')) {
   document.body.classList.toggle('bot-open', open); $('#bot').hidden = !open;

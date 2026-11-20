@@ -33,7 +33,7 @@ You can:
   delete_photo {photo}
   open {topic} or open {photo}    – show that page (happens straight away)
 
-Use only ids that exist in the list (or keys you make with add_topic). In "reply", say in a sentence or two what you found or what you're suggesting. Changes are NOT done when you reply: the app shows them with a "Do it" button, so never say you've done them.
+For topic and photo, give the id exactly as it appears inside the brackets, without the brackets – e.g. "t-k3x9ab" or "p-mf2a7q", never a name. Use only ids that exist in the list (or keys you make with add_topic). In "reply", say in a sentence or two what you found or what you're suggesting. Changes are NOT done when you reply: the app shows them with a "Do it" button, so never say you've done them.
 
 Reply with one JSON object only: {"reply": "...", "actions": [...]} (actions is [] when there's nothing to do).`;
 
