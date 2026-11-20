@@ -115,6 +115,17 @@ const BASE = 'http://localhost:8767/';
   check('friend: Done puts each photo in the topic chosen (an owner topic, and a new one)', !!pwTopic && mineNow.photos.length === 2
     && mineNow.photos[0].topic === owners && mineNow.photos[1].topic === pwTopic.id && !(await f.$('dialog[open]')));
   check('friend: the helper button shows when the site has a passcode to unlock it', await f.$eval('#bot-btn', (b) => getComputedStyle(b).display !== 'none'));
+  // Logging in as owner on this device: its own photos can be added to the shared library.
+  const before2 = JSON.parse(gh.text('data/library.json')).photos.length;
+  await f.evaluate(() => localStorage.setItem('specialist-study-pass', JSON.stringify('pw'))); await f.goto(BASE); await f.reload();
+  await f.waitForSelector('[data-act="adopt"]'); await f.click('[data-act="adopt"]');
+  const target = await f.$eval('#adopt-to', (s) => [...s.options].find((o) => o.textContent.includes('Proof')).value);
+  await f.selectOption('#adopt-to', target); await f.click('#adopt-go');
+  await f.waitForFunction(() => !document.querySelector('dialog[open]'));
+  const lib4 = JSON.parse(gh.text('data/library.json'));
+  const mine4 = await f.evaluate(() => window.__app.mine);
+  check('owner login: photos only on this device can be added to the shared library (and leave the device)', lib4.photos.length === before2 + 2
+    && lib4.photos.slice(-2).every((p) => p.topic === target) && mine4.photos.length === 0 && !(await f.$('[data-act="adopt"]')));
 
   // ---- a phone ----
   const ph = await (await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: 'block' })).newPage();

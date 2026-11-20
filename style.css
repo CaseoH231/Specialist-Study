@@ -390,3 +390,5 @@ img.c-doc { height: auto; }
 .tabs { display: flex; gap: 4px; background: var(--panel2); padding: 4px; border-radius: 12px; width: fit-content; max-width: 100%; overflow-x: auto; }
 .tabs button { border: none; background: none; padding: 6px 12px; white-space: nowrap; }
 .tabs button.on { background: var(--panel); box-shadow: var(--shadow-sm); }
+.adopt { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 0 18px; }
+.adopt button { margin-left: auto; }

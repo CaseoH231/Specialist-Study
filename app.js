@@ -152,6 +152,47 @@ function isMineOp(o) {
 }
 
 // ---------- photos: shrink before saving ----------
+// Photos uploaded on this device before logging in as owner: copy them into the shared library, then drop the device copies.
+async function adoptPhotos() {
+  const list = [...mine.photos];
+  if (!list.length || !isOwner()) return;
+  const keep = list.find((p) => topicOf(server, p.topic))?.topic || '';
+  showDialog(`<div class="dlg-head"><h2 class="grow">Add to your shared library</h2><button class="link" data-close>✕</button></div>
+    <div class="dlg-body form"><div class="up-list">${list.map((p) => `<div class="up-row"><img src="${src(p)}" alt=""><div><b>${esc(p.title)}</b>
+      <span class="st">now in ${esc(pathOf(V, T(p.topic)) || '?')}</span></div></div>`).join('')}</div>
+      <label>Put them in<select id="adopt-to"><option value="__keep">Where they are now (if it’s one of your topics), otherwise Unsorted</option>
+        ${treeOrder(server).map(({ t, depth }) => `<option value="${t.id}" ${t.id === keep && list.every((p) => p.topic === keep) ? 'selected' : ''}>${'  '.repeat(depth)}${esc(t.name)}</option>`).join('')}</select></label>
+      <p class="hint">They’re saved to GitHub like any upload. The copies on this device are then removed.</p></div>
+    <div class="dlg-foot"><span class="grow" id="adopt-st"></span><button data-close>Cancel</button><button class="primary" id="adopt-go">Add ${plural(list.length, 'photo')}</button></div>`, 'small');
+  $('#adopt-go').onclick = async () => {
+    const to = $('#adopt-to').value, btn = $('#adopt-go'); btn.disabled = true;
+    const ops = [], moved = [];
+    for (const [i, p] of list.entries()) {
+      $('#adopt-st').textContent = `Saving ${i + 1} of ${list.length}…`;
+      const blob = await idbGet(p.id).catch(() => null);
+      if (!blob) continue;
+      const b64 = await new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.readAsDataURL(blob); });
+      const id = rid('p-');
+      const { res, data, cancelled } = await callApi('api/upload', { id, data: b64 });
+      if (cancelled || !res?.ok) { toast(cancelled ? 'Stopped.' : `Not saved: ${problem(res, data)}`); break; }
+      const topic = to === '__keep' ? (topicOf(server, p.topic) ? p.topic : 'unsorted') : to;
+      ops.push({ type: 'add_photo', photo: { id, topic, title: p.title, added: p.added, w: p.w, h: p.h } });
+      moved.push(p.id);
+    }
+    if (ops.length) {
+      const { res, data } = await callApi('api/change', { ops });
+      if (!res?.ok) { dlg.close(); return toast(`Not saved: ${problem(res, data)}`); }
+      server = data.library; store.set(K.lib, server);
+      for (const id of moved) { idbDel(id).catch(() => {}); localUrls.delete(id); }
+      mine.photos = mine.photos.filter((p) => !moved.includes(p.id));
+      mine.topics = mine.topics.filter((t) => mine.photos.some((p) => below(V, t.id).includes(p.topic)) || mine.topics.some((c) => c.parent === t.id));
+      saveMine(); V = view();
+    }
+    dlg.close(); render();
+    toast(ops.length ? `Added ${plural(ops.length, 'photo')} to your shared library ✓` : 'Nothing was added.');
+  };
+}
+
 async function shrink(file, max) {
   const img = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(async () => {
     const el = new Image(); el.src = URL.createObjectURL(file); await el.decode(); return el;
@@ -328,6 +369,9 @@ function home() {
   return `<div class="hello"><div><p class="eyebrow">${hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening'}</p>
       <h2>Specialist Maths</h2><p class="lead">${facts}</p></div>
       <div class="tools"><button class="primary" data-act="upload">⤒ Upload photos</button></div></div>
+    ${isOwner() && mine.photos.length ? `<div class="hint warnbox adopt"><b>${plural(mine.photos.length, 'photo')} ${mine.photos.length === 1 ? 'is' : 'are'} only on this device</b>
+      – uploaded before you logged in as owner, so they’re not in your shared library (and won’t get weekly notes).
+      <button class="primary" data-act="adopt">Add ${mine.photos.length === 1 ? 'it' : 'them'} to your shared library…</button></div>` : ''}
     <a class="c-link" href="#/course"><span class="c-ico">📘</span><span><b>Study design &amp; work plan</b>
       <small>${courseCount() ? `${courseCount()} document${courseCount() === 1 ? '' : 's'} – what you’re learning this year, and when` : 'What you’re learning this year, and when'}</small></span></a>
     ${ps.length ? `<h3 class="sect-h">Recently added</h3><div class="strip">${ps.slice(-10).reverse().map(pcard).join('')}</div>` : ''}
@@ -425,6 +469,7 @@ $('#main').addEventListener('click', async (ev) => {
   ev.target.closest('details.topic-menu')?.removeAttribute('open');
   const act = b.dataset.act, t = T(current), p = photoId && P(photoId);
   if (act === 'upload') pickPhotos(null);
+  else if (act === 'adopt') adoptPhotos();
   else if (act === 'upload-here') pickPhotos(current);
   else if (act === 'new-topic') { const n = prompt('Name of the new topic:'); if (n) await newTopic(n, null); }
   else if (act === 'sub-topic') { const n = prompt(`New sub-topic inside “${t.name}”:`); if (n) { const id = await newTopic(n, t.id); if (id) go(`#/topic/${id}`); } }
