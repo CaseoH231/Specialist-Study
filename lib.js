@@ -7,12 +7,14 @@
 //   add_topic {id, name, parent}   rename_topic {topic, name}   move_topic {topic, parent}   colour_topic {topic, color}
 //   delete_topic {topic}           – its photos and sub-topics move up into its parent (nothing is lost)
 //   add_photo {photo: {...}}       move_photo {photo, topic}   rename_photo {photo, title}   delete_photo {photo}
+//   add_event {event: {id, date, title, kind}}   delete_event {event} – dates in the planner (SACs, tests…)
 //   add_path {path: [names], ids: [new ids]} – finds or makes nested topics by name (used when sorting a photo);
 //                                   an add_photo after it with topic "@path" goes in the deepest one
 
 export const COLORS = ['#4f46e5', '#0f766e', '#c2410c', '#be185d', '#1d4ed8', '#7c3aed', '#047857', '#b45309', '#0e7490', '#9f1239'];
 export const UNSORTED = 'unsorted';
-export const emptyLibrary = () => ({ version: 1, updatedAt: null, topics: [], photos: [] });
+export const emptyLibrary = () => ({ version: 1, updatedAt: null, topics: [], photos: [], events: [] });
+export const KINDS = ['SAC', 'Test', 'Exam', 'Assignment', 'Other'];
 
 const ID = /^[a-z0-9][a-z0-9-]{0,40}$/i;
 const clean = (s, max = 120) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -115,6 +117,19 @@ function applyOne(lib, op, ctx) {
     }
     case 'move_photo': { const p = P(op.photo); if (!p || !T(op.topic)) return false; p.topic = op.topic; return true; }
     case 'rename_photo': { const p = P(op.photo); if (!p || !clean(op.title)) return false; p.title = clean(op.title); return true; }
+    case 'add_event': {
+      const e = op.event || {};
+      lib.events ||= [];
+      if (!ID.test(e.id || '') || lib.events.some((x) => x.id === e.id) || !/^\d{4}-\d{2}-\d{2}$/.test(e.date || '') || !clean(e.title)) return false;
+      lib.events.push({ id: e.id, date: e.date, title: clean(e.title, 80), kind: KINDS.includes(e.kind) ? e.kind : 'Other' });
+      lib.events.sort((a, b) => a.date.localeCompare(b.date));
+      return true;
+    }
+    case 'delete_event': {
+      const n = (lib.events || []).length;
+      lib.events = (lib.events || []).filter((x) => x.id !== op.event);
+      return lib.events.length < n;
+    }
     case 'delete_photo': { const p = P(op.photo); if (!p) return false; lib.photos = lib.photos.filter((x) => x !== p); return true; }
     default: return false;
   }

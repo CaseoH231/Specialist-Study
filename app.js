@@ -7,7 +7,11 @@
 //   • Everyone else (friends): they see the owner's library, read-only, and can add photos of their own.
 //     Theirs stay on their device only (IndexedDB), never on the server.
 import { loadCourse, courseHtml, bindCourse, courseCount } from './course.js';
-import { applyOps, emptyLibrary, topicOf, photoOf, kids, ancestors, pathOf, below, treeOrder, outline, formatNotes, COLORS } from './lib.js';
+import { applyOps, emptyLibrary, topicOf, photoOf, kids, ancestors, pathOf, below, treeOrder, outline, formatNotes, COLORS, KINDS } from './lib.js';
+import { practiceHtml, bindPractice, practiceStats, currentQuestion } from './practice.js';
+import { formulasHtml, bindFormulas, formulaCount } from './formulas.js';
+import { setSources } from './unlock.js';
+import { unlockedTopics } from './practice.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -25,7 +29,10 @@ const passcode = () => store.get(K.pass, '') || '';
 let server = store.get(K.lib) || emptyLibrary();   // the owner's library (a saved copy, refreshed from the Worker)
 let mine = store.get(K.mine) || { topics: [], photos: [] }; // this device's own photos (friends)
 let who = null;                                     // /api/whoami
-let current = HOME, photoId = null, query = '', courseOpen = false;
+let current = HOME, photoId = null, query = '';
+// Study-tool pages: #/practice, #/formulas, #/planner, #/course (null = the photo pages).
+let page = null;
+const PAGES = { practice: ['✎', 'Practice'], formulas: ['∑', 'Formulas'], planner: ['🗓', 'Planner'], course: ['📘', 'Course'] };
 const openFolders = new Set(store.get(K.open, []));
 const localUrls = new Map();                        // id → object URL of a photo kept on this device
 
@@ -38,6 +45,7 @@ function view() {
   return {
     topics: [...server.topics, ...mine.topics],
     photos: [...server.photos, ...mine.photos.map((p) => ({ ...p, mine: true }))],
+    events: [...(server.events || []), ...(mine.events || []).map((e) => ({ ...e, mine: true }))].sort((a, b) => a.date.localeCompare(b.date)),
   };
 }
 let V = view();
@@ -76,6 +84,7 @@ function saveMine() {
     lost.forEach((p) => { p.topic = 'my-unsorted'; });
   }
   mine.topics.forEach((t) => { if (t.parent && !ids.has(t.parent)) delete t.parent; });
+  mine.events ||= [];
   store.set(K.mine, mine);
 }
 
@@ -123,10 +132,10 @@ async function change(ops, { quiet = false } = {}) {
   const forMine = ops.filter((o) => isMineOp(o)), forServer = ops.filter((o) => !isMineOp(o));
   if (forMine.length) {
     // The owner's topics are included (read-only) so their own photos and sub-topics can go inside them.
-    const lib = { topics: [...structuredClone(server.topics), ...mine.topics], photos: mine.photos };
+    const lib = { topics: [...structuredClone(server.topics), ...mine.topics], photos: mine.photos, events: mine.events || [] };
     for (const o of forMine) if (o.type === 'delete_photo') { idbDel(o.photo).catch(() => {}); }
     const r = applyOps(lib, forMine); skipped += r.skipped.length;
-    mine = { topics: lib.topics.filter((t) => isMine(t.id)), photos: lib.photos }; saveMine();
+    mine = { topics: lib.topics.filter((t) => isMine(t.id)), photos: lib.photos, events: lib.events }; saveMine();
   }
   if (forServer.length) {
     if (!isOwner()) { toast('Only the owner can change their photos.'); return false; }
@@ -147,6 +156,8 @@ function isMineOp(o) {
   if (o.type === 'add_topic') return isMine(o.id);
   if (o.type === 'add_photo') return isMine(o.photo.id);
   if (o.type === 'add_path') return !isOwner();
+  if (o.type === 'add_event') return isMine(o.event.id);
+  if (o.type === 'delete_event') return isMine(o.event);
   if (/_photo$/.test(o.type)) return isMine(o.photo);
   return isMine(o.topic);
 }
@@ -335,17 +346,21 @@ const pcard = (p) => `<a class="pcard" href="#/photo/${encodeURIComponent(p.id)}
   <div class="body"><b>${esc(p.title)}</b><small>${esc(day(p.added))}${current === HOME || query ? ` · ${esc(T(p.topic)?.name || '')}` : ''}</small></div></a>`;
 function folderCard(t) {
   const subs = kids(V, t.id), ps = photosIn(t.id);
-  return `<a class="tcard" href="#/topic/${encodeURIComponent(t.id)}" style="--c:${t.color}"><h3>${FOLDER}${esc(t.name)}</h3>
+  return `<a class="tcard" href="#/topic/${encodeURIComponent(t.id)}" style="--c:${t.color}">${confOf(t.id) ? `<span class="conf-dot c${confOf(t.id)}" title="${CONF_LABEL[confOf(t.id)]}"></span>` : ''}<h3>${FOLDER}${esc(t.name)}</h3>
     <span class="tn">${subs.length ? `${plural(subs.length, 'sub-topic')} · ` : ''}${plural(ps.length, 'photo')}</span>
     ${ps.length ? `<div class="mosaic">${ps.slice(-4).reverse().map((p) => `<img src="${src(p)}" alt="" loading="lazy">`).join('')}</div>` : ''}</a>`;
 }
 
 function render() {
+  // The study tools only cover what's been uploaded: tell them the uploaded topics' names and photos' titles.
+  setSources([...V.topics.map((t) => t.name), ...V.photos.map((p) => p.title)]);
   if (current !== HOME && !T(current)) current = HOME;
   if (photoId && !P(photoId)) photoId = null;
   $('#sub').textContent = `${plural(V.photos.length, 'photo')} · ${plural(V.topics.length, 'topic')}${passcode() ? ' · 🔑 Owner' : ''}`;
-  $('#topics').innerHTML = `<button class="topic home ${current === HOME && !query && !photoId && !courseOpen ? 'on' : ''}" data-topic="${HOME}"><span class="ico">⌂</span><span class="nm">Home</span></button>
-    <button class="topic home ${courseOpen ? 'on' : ''}" data-course><span class="ico">📘</span><span class="nm">Course</span><span class="n">${courseCount() || ''}</span></button>
+  const nextEv = upcoming()[0];
+  const badge = { course: courseCount() || '', practice: practiceStats().streak ? `🔥${practiceStats().streak}` : '', planner: nextEv ? countdown(nextEv.date, true) : '', formulas: '' };
+  $('#topics').innerHTML = `<button class="topic home ${current === HOME && !query && !photoId && !page ? 'on' : ''}" data-topic="${HOME}"><span class="ico">⌂</span><span class="nm">Home</span></button>
+    ${Object.entries(PAGES).map(([k, [ico, name]]) => `<button class="topic home ${page === k ? 'on' : ''}" data-page="${k}"${k === 'course' ? ' data-course' : ''}><span class="ico">${ico}</span><span class="nm">${name}</span><span class="n">${badge[k]}</span></button>`).join('')}
     <div class="nav-label">Topics</div>${navTree()}<button class="topic add" id="add-topic">+ New topic</button>`;
   const main = $('#main');
   if (query) {
@@ -353,12 +368,80 @@ function render() {
     const hits = V.photos.filter((p) => [p.title, pathOf(V, T(p.topic)), p.notes].join(' ').toLowerCase().includes(q));
     main.innerHTML = `<div class="bar"><h2>Search</h2></div><p class="lead">${plural(hits.length, 'photo')} matching “${esc(query)}”</p>
       ${hits.length ? `<div class="pgrid">${hits.map(pcard).join('')}</div>` : '<p class="empty">Nothing found.</p>'}`;
-  } else if (courseOpen) { main.innerHTML = courseHtml(isOwner()); bindCourse(main, { isOwner, callApi, toast, redraw: render }); return; }
+  } else if (page) { main.onclick = null; main.oninput = null; return showPage(main); }
   else if (photoId) main.innerHTML = photoPage();
   else if (current === HOME) main.innerHTML = home();
   else main.innerHTML = topicPage();
   drawMaths(main);
 }
+
+// ---------- study-tool pages ----------
+function showPage(main) {
+  const redraw = () => render();
+  if (page === 'course') { main.innerHTML = courseHtml(isOwner()); bindCourse(main, { isOwner, callApi, toast, redraw }); return; }
+  if (page === 'practice') { const draw = () => { main.innerHTML = practiceHtml(); bindPractice(main, { redraw: draw }); renderMath(main); }; draw(); return; }
+  if (page === 'formulas') { main.innerHTML = formulasHtml(); bindFormulas(main, { drawMaths: renderMath }); return; }
+  if (page === 'planner') { main.innerHTML = plannerHtml(); bindPlanner(main); }
+}
+
+// ---------- planner: SACs, tests and exams with countdowns ----------
+const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const daysTo = (iso) => Math.round((new Date(`${iso}T00:00:00`) - new Date(`${todayIso()}T00:00:00`)) / 864e5);
+function countdown(iso, short = false) {
+  const n = daysTo(iso);
+  if (short) return n === 0 ? 'today' : `${n}d`;
+  return n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n < 0 ? `${-n} day${n === -1 ? '' : 's'} ago` : `In ${n} days`;
+}
+const upcoming = () => V.events.filter((e) => daysTo(e.date) >= 0);
+const KIND_ICON = { SAC: '📝', Test: '🧪', Exam: '🎓', Assignment: '📎', Other: '📌' };
+const evRow = (e) => `<li class="ev ${daysTo(e.date) <= 3 && daysTo(e.date) >= 0 ? 'soon' : ''}"><span class="ev-ico">${KIND_ICON[e.kind] || '📌'}</span>
+  <span class="ev-main"><b>${esc(e.title)}</b><small>${esc(new Date(`${e.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }))} · ${e.kind}${e.mine ? ' · only you' : ' · shared'}</small></span>
+  <span class="ev-when">${countdown(e.date)}</span>${(e.mine || isOwner()) ? `<button class="link danger" data-delev="${e.id}" aria-label="Remove ${esc(e.title)}">✕</button>` : ''}</li>`;
+function plannerHtml() {
+  const up = upcoming(), past = V.events.filter((e) => daysTo(e.date) < 0).reverse();
+  return `<nav class="crumbs" aria-label="You are here"><a href="#/">Home</a> <span>›</span> <b>Planner</b></nav>
+    <div class="bar"><h2>Planner</h2></div>
+    <p class="lead">${isOwner() ? 'Dates you add here are shared – your friends see them too.' : 'Dates from the owner show up here; ones you add are just for you.'}</p>
+    <form class="ev-form" id="ev-form"><input name="title" required maxlength="80" placeholder="e.g. SAC 2 – Calculus" aria-label="What">
+      <input name="date" type="date" required aria-label="Date" value="${todayIso()}"><select name="kind" aria-label="Type">${KINDS.map((k) => `<option>${k}</option>`).join('')}</select>
+      <button class="primary">Add</button></form>
+    ${up.length ? `<ul class="ev-list">${up.map(evRow).join('')}</ul>` : '<div class="empty"><p>Nothing coming up. Add your SAC and test dates above.</p></div>'}
+    ${past.length ? `<details class="more-list"><summary>${past.length} past</summary><ul class="ev-list past">${past.map(evRow).join('')}</ul></details>` : ''}`;
+}
+function bindPlanner(main) {
+  main.querySelector('#ev-form').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target), own = !isOwner();
+    const e = { id: own ? rid('my-e') : rid('e-'), title: f.get('title'), date: f.get('date'), kind: f.get('kind') };
+    if (await change([{ type: 'add_event', event: e }], { quiet: true })) toast(own ? 'Added ✓' : 'Added – your friends see it too ✓');
+  };
+  main.onclick = async (ev) => {
+    const d = ev.target.closest('[data-delev]');
+    if (d && confirm('Remove this date?')) await change([{ type: 'delete_event', event: d.dataset.delev }], { quiet: true });
+  };
+}
+
+// ---------- how confident you feel about each topic (this device only) ----------
+const CONF = 'specialist-study-conf';
+let conf = store.get(CONF, {});
+const CONF_LABEL = ['', '🔴 Need help', '🟡 Getting there', '🟢 Got it'];
+const confOf = (id) => conf[id] || 0;
+
+// ---------- share and print ----------
+async function share(title) {
+  const url = location.href;
+  try { if (navigator.share) { await navigator.share({ title, url }); return; } } catch { return; }
+  try { await navigator.clipboard.writeText(url); toast('Link copied – send it to a friend'); } catch { prompt('Copy this link:', url); }
+}
+async function printPhotos(title, photos) {
+  const area = $('#print-area');
+  area.innerHTML = `<h1>${esc(title)}</h1>${photos.map((p) => `<section class="pr-photo"><h2>${esc(p.title)}</h2><img src="${src(p)}" alt="">
+    ${p.notes ? `<div class="notes">${formatNotes(p.notes)}</div>` : ''}</section>`).join('')}`;
+  renderMath(area);
+  await Promise.all([...area.querySelectorAll('img')].map((i) => (i.complete ? null : new Promise((ok) => { i.onload = i.onerror = ok; }))));
+  window.print();
+}
+window.addEventListener('afterprint', () => { $('#print-area').innerHTML = ''; });
 
 function home() {
   const ps = V.photos, hr = new Date().getHours();
@@ -366,9 +449,20 @@ function home() {
   const fresh = ps.filter((p) => p.notesAt && p.notesAt > week);
   const facts = ps.length ? [plural(ps.length, 'photo'), plural(V.topics.length, 'topic'), `${ps.filter((p) => p.notes).length} with notes`].join(' · ')
     : 'Upload photos of your work and they’ll be sorted into topics for you.';
-  return `<div class="hello"><div><p class="eyebrow">${hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening'}</p>
+  const st = practiceStats(), next = upcoming().slice(0, 3);
+  const weak = treeOrder(V).map(({ t }) => t).filter((t) => confOf(t.id) === 1);
+  const tile = (k, sub) => `<a class="tool-tile" href="#/${k}"><span class="tt-ico">${PAGES[k][0]}</span><b>${PAGES[k][1]}</b><small>${sub}</small></a>`;
+  return `<div class="hello hero"><div><p class="eyebrow">${hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening'}</p>
       <h2>Specialist Maths</h2><p class="lead">${facts}</p></div>
       <div class="tools"><button class="primary" data-act="upload">⤒ Upload photos</button></div></div>
+    <div class="dash-top">
+      <section class="panel up-next"><h3>Coming up</h3>${next.length ? `<ul class="ev-list mini">${next.map(evRow).join('')}</ul>`
+        : '<p>No SACs or tests added yet.</p>'}<a class="btn" href="#/planner">${next.length ? 'Open planner' : '+ Add dates'}</a></section>
+      <section class="panel streak-card"><h3>Practice</h3><p class="big">🔥 ${st.streak}</p><p>day streak${st.streak ? '' : ' – answer a question to start one'}</p>
+        <a class="btn primary-btn" href="#/practice">Practise now</a></section>
+    </div>
+    <div class="tool-row">${tile('practice', unlockedTopics().length ? `On ${unlockedTopics().length === 1 ? unlockedTopics()[0] : `${unlockedTopics().length} of your topics`}` : '🔒 Unlocks as you upload')}${tile('formulas', formulaCount() ? `${formulaCount()} from your uploads` : '🔒 Unlocks as you upload')}${tile('planner', 'SACs & tests')}</div>
+    ${weak.length ? `<section class="panel revise"><h3>Revise these first</h3><p>Topics you marked 🔴 Need help.</p><div class="chips">${weak.map((t) => `<a class="chip ask" href="#/topic/${encodeURIComponent(t.id)}">${esc(t.name)}</a>`).join('')}</div></section>` : ''}
     ${isOwner() && mine.photos.length ? `<div class="hint warnbox adopt"><b>${plural(mine.photos.length, 'photo')} ${mine.photos.length === 1 ? 'is' : 'are'} only on this device</b>
       – uploaded before you logged in as owner, so they’re not in your shared library (and won’t get weekly notes).
       <button class="primary" data-act="adopt">Add ${mine.photos.length === 1 ? 'it' : 'them'} to your shared library…</button></div>` : ''}
@@ -393,8 +487,10 @@ function topicPage() {
       ${edit ? `<details class="more topic-menu"><summary aria-label="Topic options">⋯</summary><div class="menu">
         <button data-act="rename-topic">Rename</button><button data-act="colour-topic">Change colour</button>
         <button data-act="move-topic">Move into another topic…</button><button class="danger" data-act="delete-topic">Delete topic…</button></div></details>` : ''}
+      <button data-act="share">↗ Share</button>${all.length ? '<button data-act="print-topic">⎙ Print / PDF</button>' : ''}
       <button data-act="sub-topic">+ Sub-topic</button><button class="primary" data-act="upload-here">⤒ Upload here</button></div></div>
     <p class="lead">${subs.length ? `${plural(subs.length, 'sub-topic')} · ` : ''}${plural(all.length, 'photo')}${isMine(t.id) ? ' · only on this device' : ''}</p>
+    <div class="conf" role="group" aria-label="How confident are you?"><span>How confident are you?</span>${[1, 2, 3].map((n) => `<button class="conf-b c${n} ${confOf(t.id) === n ? 'on' : ''}" data-conf="${n}">${CONF_LABEL[n]}</button>`).join('')}</div>
     ${subs.length ? `<h3 class="sect-h">Sub-topics</h3><div class="tgrid">${subs.map(folderCard).join('')}</div>` : ''}
     ${here.length ? `${subs.length ? '<h3 class="sect-h">Photos</h3>' : ''}<div class="pgrid">${here.map(pcard).join('')}</div>`
       : subs.length ? '' : '<div class="empty"><p>No photos here yet.</p><button class="primary" data-act="upload-here">⤒ Upload here</button></div>'}`;
@@ -408,7 +504,7 @@ function photoPage() {
       ${edit ? `<details class="more topic-menu"><summary aria-label="Photo options">⋯</summary><div class="menu">
         <button data-act="rename-photo">Rename</button><button data-act="move-photo">Move to another topic…</button>
         <button class="danger" data-act="delete-photo">Delete photo…</button></div></details>` : ''}
-      <button class="dark" data-act="full">⛶ Full screen</button></div></div>
+      <button data-act="share">↗ Share</button><button class="dark" data-act="full">⛶ Full screen</button></div></div>
     <p class="lead">${esc(day(p.added))}${p.mine ? ' · yours, only on this device' : ''}${list.length > 1 ? ` · ${i + 1} of ${list.length} in this topic` : ''}</p>
     <div class="shot"><img src="${src(p)}" alt="${esc(p.title)}" data-act="full"></div>
     ${p.notes ? `<section class="notes"><h3>Notes <small>added ${esc(new Date(p.notesAt || Date.now()).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))}</small></h3>${formatNotes(p.notes)}</section>`
@@ -416,14 +512,15 @@ function photoPage() {
     <div class="note-nav">${prev ? `<a class="btn" href="#/photo/${encodeURIComponent(prev.id)}">‹ ${esc(prev.title)}</a>` : '<span></span>'}
       ${next ? `<a class="btn" href="#/photo/${encodeURIComponent(next.id)}">${esc(next.title)} ›</a>` : ''}</div></div>`;
 }
-function drawMaths(el) {
-  if (!window.renderMathInElement) return;
-  el.querySelectorAll('.notes').forEach((n) => window.renderMathInElement(n, {
+function renderMath(el) {
+  if (!window.renderMathInElement || !el) return;
+  window.renderMathInElement(el, {
     delimiters: [{ left: '$$', right: '$$', display: true }, { left: '\\[', right: '\\]', display: true }, { left: '$', right: '$', display: false }, { left: '\\(', right: '\\)', display: false }],
     throwOnError: false,
-  }));
+  });
 }
-window.addEventListener('load', () => drawMaths($('#main')));
+const drawMaths = (el) => el.querySelectorAll('.notes, .ev-list').forEach(renderMath);
+window.addEventListener('load', () => { if (page && page !== 'planner') renderMath($('#main')); else drawMaths($('#main')); });
 
 // ---------- full-screen viewer ----------
 let viewing = null;
@@ -465,11 +562,15 @@ async function pickTopic(title, { exclude = [], allowTop = false, ownerOnly = fa
   });
 }
 $('#main').addEventListener('click', async (ev) => {
+  const cf = ev.target.closest('[data-conf]');
+  if (cf && T(current)) { const n = +cf.dataset.conf; conf[current] = confOf(current) === n ? 0 : n; store.set(CONF, conf); return render(); }
   const b = ev.target.closest('[data-act]'); if (!b) return;
   ev.target.closest('details.topic-menu')?.removeAttribute('open');
   const act = b.dataset.act, t = T(current), p = photoId && P(photoId);
   if (act === 'upload') pickPhotos(null);
   else if (act === 'adopt') adoptPhotos();
+  else if (act === 'share') share(p ? p.title : t ? t.name : 'Specialist Maths');
+  else if (act === 'print-topic') printPhotos(pathOf(V, t), photosIn(t.id));
   else if (act === 'upload-here') pickPhotos(current);
   else if (act === 'new-topic') { const n = prompt('Name of the new topic:'); if (n) await newTopic(n, null); }
   else if (act === 'sub-topic') { const n = prompt(`New sub-topic inside “${t.name}”:`); if (n) { const id = await newTopic(n, t.id); if (id) go(`#/topic/${id}`); } }
@@ -494,7 +595,7 @@ $('#main').addEventListener('click', async (ev) => {
 $('#topics').addEventListener('click', async (ev) => {
   const tog = ev.target.closest('[data-toggle]');
   if (tog) { ev.stopPropagation(); const id = tog.dataset.toggle; openFolders.has(id) ? openFolders.delete(id) : openFolders.add(id); store.set(K.open, [...openFolders]); return render(); }
-  if (ev.target.closest('[data-course]')) return go('#/course');
+  const pg = ev.target.closest('[data-page]'); if (pg) return go(`#/${pg.dataset.page}`);
   if (ev.target.closest('#add-topic')) { const n = prompt('Name of the new topic:'); if (n) await newTopic(n, null); return; }
   const b = ev.target.closest('[data-topic]'); if (b) go(b.dataset.topic === HOME ? '#/' : `#/topic/${b.dataset.topic}`);
 });
@@ -504,7 +605,8 @@ function go(hash) { if (location.hash === hash || (hash === '#/' && !location.ha
 function route() {
   const [, kind, raw] = location.hash.match(/^#\/(topic|photo)\/(.+)$/) || [];
   const id = raw && decodeURIComponent(raw);
-  query = ''; $('#search').value = ''; $('#msearch').value = ''; photoId = null; courseOpen = location.hash === '#/course';
+  query = ''; $('#search').value = ''; $('#msearch').value = ''; photoId = null;
+  page = (location.hash.match(/^#\/(\w+)$/) || [])[1]; if (!PAGES[page]) page = null;
   if (kind === 'photo' && P(id)) { photoId = id; current = P(id).topic; }
   else if (kind === 'topic' && T(id)) { current = id; if (kids(V, id).length) openFolders.add(id); }
   else current = HOME;
@@ -665,7 +767,7 @@ $('#btn-install').onclick = async () => { if (!installEvent) return; installEven
 document.addEventListener('click', (ev) => { document.querySelectorAll('details.more[open]').forEach((d) => { if (!d.contains(ev.target)) d.removeAttribute('open'); }); });
 
 // ---------- search & keys ----------
-const onSearch = (ev) => { query = ev.target.value.trim(); photoId = null; courseOpen = false; render(); };
+const onSearch = (ev) => { query = ev.target.value.trim(); photoId = null; page = null; render(); };
 $('#search').addEventListener('input', onSearch); $('#msearch').addEventListener('input', onSearch);
 document.addEventListener('keydown', (ev) => {
   if (!$('#viewer').hidden) {
@@ -685,7 +787,7 @@ function setNav(open) {
   document.body.classList.toggle('nav-open', open);
   $('#nav-btn').setAttribute('aria-expanded', String(open));
   document.querySelectorAll('.tabbar [data-tab]').forEach((b) => b.classList.toggle('on',
-    open ? b.dataset.tab === 'topics' : b.dataset.tab === 'home' && current === HOME && !photoId && !query && !courseOpen));
+    open ? b.dataset.tab === 'topics' : b.dataset.tab === page || (b.dataset.tab === 'home' && current === HOME && !photoId && !query && !page)));
 }
 $('#nav-btn').onclick = () => setNav(!document.body.classList.contains('nav-open'));
 $('#scrim').onclick = () => setNav(false);
@@ -696,6 +798,7 @@ document.querySelector('.tabbar').addEventListener('click', (ev) => {
   else if (tab === 'topics') setNav(!document.body.classList.contains('nav-open'));
   else if (tab === 'upload') pickPhotos(current !== HOME && !photoId ? current : null);
   else if (tab === 'ask') toggleHelper();
+  else if (PAGES[tab]) go(`#/${tab}`);
 });
 $('#side').addEventListener('click', (ev) => { if (ev.target.closest('.side-tools > button, .menu button')) setNav(false); });
 
@@ -707,4 +810,5 @@ checkWho().then(() => render());
 refresh().then(route);
 loadCourse().then(() => render());
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
-window.__app = { get server() { return server; }, get mine() { return mine; } }; // for the tests
+
+window.__app = { get server() { return server; }, get mine() { return mine; }, question: currentQuestion }; // for the tests

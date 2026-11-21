@@ -15,5 +15,7 @@ check "library rules" test_lib.cjs "lib ok"
 check "worker: GitHub storage, locks, AI" test_worker.cjs "worker ok"
 check "app: owner, friend, phone" test_app.cjs "app ok"
 check "course: study design & work plan" test_course.cjs "course ok"
+check "study tools: maths checked independently" test_tools.cjs "tools ok"
+check "study tools in the browser" test_v2.cjs "v2 ok"
 python3 tools/notes.py check >/dev/null || { echo "FAIL  data/library.json"; fails=$((fails + 1)); }
 [ $fails = 0 ] && echo "All tests passed." || { echo "$fails test(s) failed."; exit 1; }

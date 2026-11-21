@@ -1,8 +1,8 @@
 // Service worker: lets the installed app open with no internet.
 // App files: network first, saved copy when offline. Photos never change, so once seen they come from the saved copy.
 // Bump CACHE on each release.
-const CACHE = 'specialist-study-v7';
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'lib.js', 'course.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
+const CACHE = 'specialist-study-v8';
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'lib.js', 'course.js', 'practice.js', 'formulas.js', 'unlock.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'vendor/katex/katex.min.js', 'vendor/katex/katex.min.css', 'vendor/katex/auto-render.min.js'];
 
 self.addEventListener('install', (e) => {

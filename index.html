@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Specialist Study</title>
-  <meta name="description" content="Photos of your Specialist Maths work, sorted into topics automatically, with notes underneath.">
+  <meta name="description" content="Specialist Maths study app: photos of your work sorted into topics with notes, practice questions, a formula sheet and a SAC planner.">
   <meta name="theme-color" content="#0f3d40">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="vendor/katex/katex.min.css">
   <script defer src="vendor/katex/katex.min.js"></script>
   <script defer src="vendor/katex/auto-render.min.js"></script>
@@ -46,6 +46,7 @@
   <nav class="tabbar" aria-label="Quick links">
     <button data-tab="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
     <button data-tab="topics"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Topics</button>
+    <button data-tab="practice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16zM14 6l3 3"/></svg>Practice</button>
     <button data-tab="upload"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8a2 2 0 0 1 2-2h2l2-2h4l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg>Upload</button>
     <button data-tab="ask" class="ai-only"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-8l-5 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>Ask</button>
   </nav>
@@ -63,6 +64,7 @@
     <button class="v-nav prev" id="v-prev" aria-label="Previous photo">‹</button>
     <button class="v-nav next" id="v-next" aria-label="Next photo">›</button>
   </div>
+  <div id="print-area" aria-hidden="true"></div>
   <dialog id="dlg"></dialog>
   <div id="toast" role="status"></div>
   <script type="module" src="app.js"></script>

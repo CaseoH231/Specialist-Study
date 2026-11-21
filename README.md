@@ -8,6 +8,10 @@ Live at **https://specialist-study.adrian11jonker.workers.dev** – installable 
 - **Click a photo** to see it big, then **Full screen** (zoom, swipe / arrow keys for the next one).
 - **✦ Ask** – the helper: "move the induction photos into Proof", "rename this topic"… It suggests, you press **Do it**.
 - **Notes** under each photo are written once a week by Claude (see `docs/WEEKLY.md`).
+- **Practice** – fresh Specialist questions on the topics you've uploaded work for (nothing else), marked instantly with worked answers, plus a daily streak.
+- **Formula sheet** – only formulas for what you've uploaded; more unlock as you upload. Searchable, star the ones you forget, printable.
+- **Planner** – SAC/test dates with countdowns. The owner's are shared with everyone; friends can add their own.
+- **Confidence** – mark each topic 🔴 / 🟡 / 🟢; home shows what to revise first. **Share** a link to any topic or photo, or **print** a topic as a PDF.
 - **Friends** who open the link see your photos and notes (read-only). Photos they upload stay on their own device.
 
 ## Setting up (Cloudflare → Workers → specialist-study → Settings → Variables and secrets)
