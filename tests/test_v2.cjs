@@ -34,7 +34,7 @@ const BASE = 'http://localhost:8767/';
   check('locked: nothing uploaded → no practice, no formulas', pLocked && fLocked);
   await empty.close();
   // Upload some topics: only those unlock.
-  gh.put('data/library.json', JSON.stringify({ version: 1, events: [], photos: [{ id: 'p-aaaaaa1', topic: 't-prob', title: 'Venn diagram questions', added: '2026-11-20', file: 'photos/p-aaaaaa1.jpg' }],
+  gh.put('data/library.json', JSON.stringify({ version: 1, events: [], unlocked: ['Modulus'], photos: [{ id: 'p-aaaaaa1', topic: 't-prob', title: 'Venn diagram questions', added: '2026-11-20', file: 'photos/p-aaaaaa1.jpg', formulas: ['Addition rule for sets'] }],
     topics: [{ id: 't-calc', name: 'Vectors', color: '#4f46e5' }, { id: 't-prob', name: 'Complex numbers', color: '#be185d' }, { id: 't-log', name: 'Sets', color: '#0f766e' }] }));
   const o = await page(true);
   check('home: study tools, planner and practice cards', (await o.$$('.tool-tile')).length === 3 && !!(await o.$('.up-next')) && !!(await o.$('.streak-card')));
@@ -64,10 +64,10 @@ const BASE = 'http://localhost:8767/';
   await o.click('#topics [data-page="formulas"]'); await o.waitForSelector('.f-card');
   const all = (await o.$$('.f-card')).length;
   const names = await o.$$eval('.f-card header b', (x) => x.map((e) => e.textContent));
-  await o.fill('#f-search', 'vector'); await o.waitForTimeout(100);
+  await o.fill('#f-search', 'modulus'); await o.waitForTimeout(100);
   const some = (await o.$$('.f-card')).length;
   await o.click('.f-star >> nth=0'); await o.fill('#f-search', ''); await o.click('[data-f="stars"]');
-  check('formulas: only ones for uploaded topics, searchable and starrable', all > 5 && all < 30 && names.includes('Addition rule for sets') && names.includes('Modulus') && !names.includes('Cosine rule')
+  check('formulas: only ones written on a photo or unlocked on request, searchable and starrable', all === 2 && names.sort().join('|') === 'Addition rule for sets|Modulus' && names.includes('Addition rule for sets') && names.includes('Modulus') && !names.includes('Cosine rule')
     && some > 0 && some < all && (await o.$$('.f-card')).length === 1);
 
   // Planner: the owner's dates are shared.

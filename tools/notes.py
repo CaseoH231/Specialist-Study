@@ -1,8 +1,10 @@
 """The weekly notes job's helper (see docs/WEEKLY.md). Works on data/library.json in this checkout.
   python3 tools/notes.py pending          – photos with no notes yet: id, file, topic path, title
   python3 tools/notes.py set ID FILE      – put the text in FILE under photo ID as its notes
+  python3 tools/notes.py formula-names    – every name on the formula sheet (formulas.js)
+  python3 tools/notes.py formulas ID NAME…  – the formula-sheet entries explicitly written on photo ID (replaces its list; none = clear)
   python3 tools/notes.py check            – checks library.json is valid (run before committing)"""
-import json, os, sys, datetime
+import json, os, re, sys, datetime
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 LIB = os.path.join(ROOT, 'data', 'library.json')
@@ -16,6 +18,11 @@ def load():
 def save(lib):
     with open(LIB, 'w', encoding='utf-8') as f:
         json.dump(lib, f, indent=1, ensure_ascii=False)
+
+def formula_names():
+    src = open(os.path.join(ROOT, 'formulas.js'), encoding='utf-8').read()
+    sheet = src[src.index('export const SHEET'):]
+    return re.findall(r"^    \['((?:[^'\\]|\\.)+)', '", sheet, re.M)
 
 def path_of(lib, tid):
     by = {t['id']: t for t in lib['topics']}
@@ -40,11 +47,24 @@ def main(args):
         p['notesAt'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
         lib['updatedAt'] = p['notesAt']
         save(lib); print('ok', p['id'])
+    elif args[0] == 'formula-names':
+        print('\n'.join(formula_names()))
+    elif args[0] == 'formulas' and len(args) >= 2:
+        known = formula_names()
+        bad = [n for n in args[2:] if n not in known]
+        if bad: sys.exit('not on the formula sheet: ' + ', '.join(bad) + '  (see: python3 tools/notes.py formula-names)')
+        p = next((p for p in lib['photos'] if p['id'] == args[1]), None)
+        if not p: sys.exit(f'no photo {args[1]}')
+        p['formulas'] = list(dict.fromkeys(args[2:]))
+        save(lib); print('ok', p['id'], len(p['formulas']), 'formula(s)')
     elif args[0] == 'check':
         ids = {t['id'] for t in lib['topics']}
         bad = [p['id'] for p in lib['photos'] if p['topic'] not in ids]
         bad += [t['id'] for t in lib['topics'] if t.get('parent') and t['parent'] not in ids]
         if bad: sys.exit('broken references: ' + ', '.join(bad))
+        known = set(formula_names())
+        unknown = [n for p in lib['photos'] for n in p.get('formulas', []) if n not in known] + [n for n in lib.get('unlocked', []) if n not in known]
+        if unknown: sys.exit('formula names not on the sheet: ' + ', '.join(sorted(set(unknown))))
         print(f"library ok: {len(lib['photos'])} photos, {len(lib['topics'])} topics")
     else:
         sys.exit(__doc__)

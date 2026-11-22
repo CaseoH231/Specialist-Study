@@ -8,12 +8,14 @@
 //   delete_topic {topic}           – its photos and sub-topics move up into its parent (nothing is lost)
 //   add_photo {photo: {...}}       move_photo {photo, topic}   rename_photo {photo, title}   delete_photo {photo}
 //   add_event {event: {id, date, title, kind}}   delete_event {event} – dates in the planner (SACs, tests…)
+//   unlock_formula {name}   lock_formula {name} – formula-sheet entries shown on request (the helper bot)
+// Photos can also carry formulas: [names] – formula-sheet entries explicitly written on them (set by the weekly notes job).
 //   add_path {path: [names], ids: [new ids]} – finds or makes nested topics by name (used when sorting a photo);
 //                                   an add_photo after it with topic "@path" goes in the deepest one
 
 export const COLORS = ['#4f46e5', '#0f766e', '#c2410c', '#be185d', '#1d4ed8', '#7c3aed', '#047857', '#b45309', '#0e7490', '#9f1239'];
 export const UNSORTED = 'unsorted';
-export const emptyLibrary = () => ({ version: 1, updatedAt: null, topics: [], photos: [], events: [] });
+export const emptyLibrary = () => ({ version: 1, updatedAt: null, topics: [], photos: [], events: [], unlocked: [] });
 export const KINDS = ['SAC', 'Test', 'Exam', 'Assignment', 'Other'];
 
 const ID = /^[a-z0-9][a-z0-9-]{0,40}$/i;
@@ -124,6 +126,16 @@ function applyOne(lib, op, ctx) {
       lib.events.push({ id: e.id, date: e.date, title: clean(e.title, 80), kind: KINDS.includes(e.kind) ? e.kind : 'Other' });
       lib.events.sort((a, b) => a.date.localeCompare(b.date));
       return true;
+    }
+    case 'unlock_formula': {
+      const n = clean(op.name, 80); lib.unlocked ||= [];
+      if (!n || lib.unlocked.includes(n)) return false;
+      lib.unlocked.push(n); return true;
+    }
+    case 'lock_formula': {
+      const n = clean(op.name, 80), before = (lib.unlocked || []).length;
+      lib.unlocked = (lib.unlocked || []).filter((x) => x !== n);
+      return lib.unlocked.length < before;
     }
     case 'delete_event': {
       const n = (lib.events || []).length;

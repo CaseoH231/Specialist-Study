@@ -22,5 +22,8 @@ const path = require('path');
   check('outline lists ids for the AI', /\[t-d\] De Moivre/.test(L.outline(lib)) && /\(p-aaaaaa\) New name/.test(L.outline(lib)));
   const html = L.formatNotes('### Method\n- use $z=re^{i\\theta}$\n- **check** <b>\nDone');
   check('notes are formatted safely', html.includes('<h4>Method</h4>') && html.includes('<b>check</b> &lt;b&gt;') && html.includes('$z=re^{i\\theta}$') && html.includes('<p>Done</p>'));
+  const u = L.emptyLibrary();
+  L.applyOps(u, [{ type: 'unlock_formula', name: 'Log laws' }, { type: 'unlock_formula', name: 'Log laws' }, { type: 'unlock_formula', name: 'Modulus' }, { type: 'lock_formula', name: 'Modulus' }]);
+  check('formulas can be unlocked and locked again (no duplicates)', JSON.stringify(u.unlocked) === '["Log laws"]');
   console.log(checks.join('\n')); console.log(checks.every((c) => c.startsWith('ok')) ? 'lib ok' : 'lib FAILED');
 })();

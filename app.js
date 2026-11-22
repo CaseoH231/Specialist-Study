@@ -9,8 +9,8 @@
 import { loadCourse, courseHtml, bindCourse, courseCount } from './course.js';
 import { applyOps, emptyLibrary, topicOf, photoOf, kids, ancestors, pathOf, below, treeOrder, outline, formatNotes, COLORS, KINDS } from './lib.js';
 import { practiceHtml, bindPractice, practiceStats, currentQuestion } from './practice.js';
-import { formulasHtml, bindFormulas, formulaCount } from './formulas.js';
-import { setSources } from './unlock.js';
+import { formulasHtml, bindFormulas, formulaCount, FORMULA_NAMES } from './formulas.js';
+import { setSources, setFormulas, formulaShown } from './unlock.js';
 import { unlockedTopics } from './practice.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -156,6 +156,7 @@ function isMineOp(o) {
   if (o.type === 'add_topic') return isMine(o.id);
   if (o.type === 'add_photo') return isMine(o.photo.id);
   if (o.type === 'add_path') return !isOwner();
+  if (o.type === 'unlock_formula' || o.type === 'lock_formula') return false; // the shared library
   if (o.type === 'add_event') return isMine(o.event.id);
   if (o.type === 'delete_event') return isMine(o.event);
   if (/_photo$/.test(o.type)) return isMine(o.photo);
@@ -354,6 +355,7 @@ function folderCard(t) {
 function render() {
   // The study tools only cover what's been uploaded: tell them the uploaded topics' names and photos' titles.
   setSources([...V.topics.map((t) => t.name), ...V.photos.map((p) => p.title)]);
+  setFormulas([...server.photos.flatMap((p) => p.formulas || []), ...(server.unlocked || [])]); // explicitly on a photo, or unlocked on request
   if (current !== HOME && !T(current)) current = HOME;
   if (photoId && !P(photoId)) photoId = null;
   $('#sub').textContent = `${plural(V.photos.length, 'photo')} · ${plural(V.topics.length, 'topic')}${passcode() ? ' · 🔑 Owner' : ''}`;
@@ -669,6 +671,16 @@ function planActions(actions) {
       keys[String(a.name).trim().toLowerCase()] = id;
       continue;
     }
+    if (a.type === 'unlock_formula' || a.type === 'lock_formula') {
+      const want = cleanRef(a.name).toLowerCase();
+      const name = FORMULA_NAMES.find((n) => n.toLowerCase() === want) || FORMULA_NAMES.find((n) => n.toLowerCase().includes(want) || want.includes(n.toLowerCase()));
+      if (!name) { lines.push(`✕ There's no formula called “${cleanRef(a.name)}” on the sheet`); continue; }
+      const on = formulaShown(name);
+      if (a.type === 'unlock_formula' && on) { lines.push(`“${name}” is already unlocked`); continue; }
+      if (a.type === 'lock_formula' && !(server.unlocked || []).includes(name)) { lines.push(on ? `“${name}” is on one of your photos, so it stays` : `“${name}” is already locked`); continue; }
+      ops.push({ type: a.type, name }); lines.push(`${a.type === 'unlock_formula' ? 'Unlock' : 'Lock'} the formula “${name}”`);
+      continue;
+    }
     if (/_photo$/.test(a.type)) {
       const id = photo(a.photo);
       if (!id) { lines.push(`✕ Couldn’t find the photo “${cleanRef(a.photo)}”`); continue; }
@@ -709,7 +721,7 @@ async function askHelper(text) {
   chat.push({ role: 'user', content: text }); renderChat();
   $('#bot-msgs').insertAdjacentHTML('beforeend', '<div class="msg assistant"><div class="bubble typing"><span></span><span></span><span></span></div></div>');
   const where = photoId ? `the photo (${photoId}) “${P(photoId)?.title}”` : current !== HOME ? `the topic [${current}] ${pathOf(V, T(current))}` : 'the home page';
-  const { res, data } = await callApi('api/assistant', { messages: chat.map(({ role, content }) => ({ role, content })), library: outline(V, { notes: true }), where });
+  const { res, data } = await callApi('api/assistant', { messages: chat.map(({ role, content }) => ({ role, content })), library: outline(V, { notes: true }), where, formulas: FORMULA_NAMES.map((n) => `${formulaShown(n) ? '✓' : '🔒'} ${n}`).join('\n') });
   chat.push(res?.ok ? { role: 'assistant', content: data.reply, actions: data.actions || [] } : { role: 'assistant', content: problem(res, data) });
   store.set(K.chat, chat.slice(-30)); renderChat();
   const open = (res?.ok && data.actions || []).find((a) => a.type === 'open');

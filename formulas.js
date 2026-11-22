@@ -1,6 +1,5 @@
 // Formula sheet (#/formulas): the key Specialist Maths Units 1 & 2 formulas, searchable, with stars for the tricky ones.
-// Which uploads unlock each formula (word starts, see unlock.js). A formula shows only when something uploaded matches.
-import { unlocked, hasUploads } from './unlock.js';
+import { formulaShown } from './unlock.js';
 export const SHEET = [
   ['Number systems', [
     ['Number sets', '\\mathbb{N} \\subseteq \\mathbb{Z} \\subseteq \\mathbb{Q} \\subseteq \\mathbb{R}', '$\\mathbb{N}$ natural, $\\mathbb{Z}$ integers, $\\mathbb{Q}$ rational, $\\mathbb{R}$ real; irrationals are $\\mathbb{R} \\setminus \\mathbb{Q}$ (e.g. $\\pi$, $\\sqrt2$).'],
@@ -75,28 +74,6 @@ export const SHEET = [
   ]],
 ];
 
-export const KEYS = {
-  'Number sets': ['number set', 'number system', 'natural number', 'integer', 'rational', 'irrational', 'real number'], 'Rational numbers': ['rational', 'number set', 'number system'],
-  'Recurring decimal to fraction': ['recurring', 'decimal'], 'Surds': ['surd', 'irrational', 'rationalis'], 'Interval notation': ['interval'],
-  'Set notation': ['set'], 'Union and intersection': ['union', 'intersection', 'set', 'venn'], 'Complement': ['complement', 'set', 'venn'],
-  'Addition rule for sets': ['set', 'venn', 'union'], 'De Morgan’s laws': ['de morgan', 'complement', 'venn'],
-  'Implication': ['proof', 'logic', 'implication', 'converse', 'contrapositive'], 'Proof by contradiction': ['contradiction', 'proof', 'irrational'],
-  'Mathematical induction': ['induction'], 'Even and odd': ['proof', 'even', 'odd', 'parity'],
-  'Arithmetic sequence': ['arithmetic', 'sequence'], 'Arithmetic series': ['arithmetic', 'series'], 'Geometric sequence': ['geometric', 'sequence'],
-  'Geometric series': ['geometric', 'series'], 'Infinite geometric series': ['infinite', 'geometric', 'sum to infinity'], 'Recurrence relation': ['recurrence', 'recursion', 'recursive'],
-  'Multiplication principle': ['counting', 'multiplication principle', 'combinatoric'], 'Factorial': ['factorial', 'permutation', 'arrangement'],
-  'Permutations': ['permutation', 'arrangement'], 'Combinations': ['combination', 'choose', 'selection'], 'Pascal’s triangle': ['pascal', 'combination'],
-  'Inclusion–exclusion': ['inclusion', 'exclusion', 'venn'], 'Pigeonhole principle': ['pigeonhole'],
-  'Matrix product': ['matri'], 'Determinant (2×2)': ['matri', 'determinant'], 'Inverse (2×2)': ['matri', 'inverse matri'], 'Identity': ['matri', 'identity'],
-  'Sine rule': ['sine rule', 'non-right', 'trig'], 'Cosine rule': ['cosine rule', 'non-right', 'trig'], 'Area of a triangle': ['area of a triangle', 'trig', 'non-right'],
-  'Degrees and radians': ['radian', 'degree', 'circular', 'trig'], 'Exact values': ['exact value', 'unit circle', 'trig', 'circular'], 'Pythagorean identity': ['trig', 'identit', 'circular'],
-  'Magnitude': ['vector', 'magnitude'], 'Unit vector': ['vector', 'unit vector'], 'Scalar (dot) product': ['dot product', 'scalar product', 'vector'],
-  'Vector resolute': ['resolute', 'projection', 'vector'], 'Position vectors': ['position vector', 'vector'],
-  'Imaginary unit': ['complex', 'imaginary'], 'Cartesian form': ['complex'], 'Conjugate': ['complex', 'conjugate'], 'Modulus': ['complex', 'modulus', 'argand'],
-  'Polar form': ['polar', 'cis', 'argand'], 'Multiplying in polar form': ['polar', 'cis', 'de moivre'],
-  'Constant acceleration': ['kinematic', 'acceleration', 'velocity', 'motion'], 'More constant acceleration': ['kinematic', 'acceleration', 'motion'],
-  'Velocity and acceleration': ['kinematic', 'velocity', 'acceleration'],
-};
 
 const STARS = 'specialist-study-stars';
 let stars = new Set((() => { try { return JSON.parse(localStorage.getItem(STARS)) || []; } catch { return []; } })());
@@ -105,10 +82,11 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 
 function listHtml() {
   const f = filter.toLowerCase();
-  const parts = SHEET.map(([sect, rows]) => [sect, rows.filter(([n, tex, note]) => unlocked(KEYS[n]) && (!onlyStars || stars.has(n))
+  const parts = SHEET.map(([sect, rows]) => [sect, rows.filter(([n, tex, note]) => formulaShown(n) && (!onlyStars || stars.has(n))
     && (!f || `${sect} ${n} ${tex} ${note}`.toLowerCase().includes(f)))]).filter(([, rows]) => rows.length);
-  if (!formulaCount()) return `<div class="empty locked"><p class="lock-ico">🔒</p><p><b>Formulas unlock as you upload your work.</b></p>
-    <p>This sheet only shows formulas for things in your uploaded photos${hasUploads() ? ' – nothing uploaded so far matches a formula yet' : ''}.</p></div>`;
+  if (!formulaCount()) return `<div class="empty locked"><p class="lock-ico">🔒</p><p><b>All formulas are locked for now.</b></p>
+    <p>A formula appears once it's actually written on one of your uploaded photos (they're checked when the weekly notes are added),
+    or when you ask the ✦ Ask helper to unlock it – e.g. “unlock the quadratic formula, it's on my photo”.</p></div>`;
   if (!parts.length) return `<p class="empty">${onlyStars ? 'No starred formulas yet – tap ☆ on the ones you keep forgetting.' : 'No formulas match.'}</p>`;
   return parts.map(([sect, rows]) => `<section class="f-sect"><h3 class="sect-h">${esc(sect)}</h3><div class="f-grid">${rows.map(([n, tex, note]) => `
     <article class="f-card"><header><b>${esc(n)}</b><button class="f-star ${stars.has(n) ? 'on' : ''}" data-star="${esc(n)}" aria-label="Star ${esc(n)}">${stars.has(n) ? '★' : '☆'}</button></header>
@@ -117,7 +95,7 @@ function listHtml() {
 export function formulasHtml() {
   return `<nav class="crumbs" aria-label="You are here"><a href="#/">Home</a> <span>›</span> <b>Formula sheet</b></nav>
     <div class="bar"><h2>Formula sheet</h2><div class="tools"><button data-f="stars" class="${onlyStars ? 'dark' : ''}">★ Starred</button><button data-f="print">Print</button></div></div>
-    <p class="lead">Only formulas for what you've uploaded – ${formulaCount()} so far. More unlock as you upload more work.</p>
+    <p class="lead">Only formulas written on your uploaded photos, or ones you've asked the helper to unlock – ${formulaCount()} so far.</p>
     <input class="f-search" id="f-search" type="search" placeholder="Search formulas – e.g. vector, series, modulus" value="${esc(filter)}">
     <div id="f-list">${listHtml()}</div>`;
 }
@@ -134,4 +112,5 @@ export function bindFormulas(main, { drawMaths }) {
   drawMaths(main);
 }
 // How many formulas your uploads have unlocked (all = every formula on the sheet).
-export const formulaCount = (all = false) => SHEET.reduce((n, [, r]) => n + r.filter(([name]) => all || unlocked(KEYS[name])).length, 0);
+export const formulaCount = (all = false) => SHEET.reduce((n, [, r]) => n + r.filter(([name]) => all || formulaShown(name)).length, 0);
+export const FORMULA_NAMES = SHEET.flatMap(([, rows]) => rows.map(([name]) => name));

@@ -34,7 +34,12 @@
    "added": "2026-11-20",
    "file": "photos/p-mwojrfgzdkjm.jpg",
    "w": 2000,
-   "h": 1500
+   "h": 1500,
+   "formulas": [
+    "Recurring decimal to fraction",
+    "Number sets",
+    "Interval notation"
+   ]
   },
   {
    "id": "p-mwojrhewkler",
@@ -43,7 +48,12 @@
    "added": "2026-11-20",
    "file": "photos/p-mwojrhewkler.jpg",
    "w": 2000,
-   "h": 1500
+   "h": 1500,
+   "formulas": [
+    "Set notation",
+    "Union and intersection",
+    "Complement"
+   ]
   },
   {
    "id": "p-mwojrjntytzi",
@@ -52,7 +62,13 @@
    "added": "2026-11-20",
    "file": "photos/p-mwojrjntytzi.jpg",
    "w": 2000,
-   "h": 1500
+   "h": 1500,
+   "formulas": [
+    "Number sets",
+    "Rational numbers",
+    "Complement",
+    "Union and intersection"
+   ]
   }
  ]
 }

@@ -52,8 +52,10 @@ const path = require('path');
   check('locked: with nothing uploaded there are no questions and no formulas', P.makeQuestion(r) === null && P.unlockedTopics().length === 0 && F.formulaCount() === 0 && F.formulaCount(true) === 51);
   U.setSources(['headstart', 'Recurring decimals to fractions', 'Set notation', 'Number sets and Venn diagrams', 'Making a recurring decimal a fraction']);
   const qs = Array.from({ length: 200 }, () => P.makeQuestion(r).topic);
-  check('unlocked: your headstart uploads give only number & sets questions and their formulas', qs.every((t) => t === 'Number & sets')
-    && JSON.stringify(P.unlockedTopics()) === '["Number & sets"]' && F.formulaCount() > 4 && F.formulaCount() < 15);
+  check('unlocked: your headstart uploads give only number & sets questions', qs.every((t) => t === 'Number & sets')
+    && JSON.stringify(P.unlockedTopics()) === '["Number & sets"]');
+  check('formulas: a topic name alone unlocks none – only formulas on a photo or unlocked on request', F.formulaCount() === 0
+    && (U.setFormulas(['Addition rule for sets', 'Modulus']), F.formulaCount() === 2) && (U.setFormulas([]), F.formulaCount() === 0));
   U.setSources(['catalogue', 'reset']);
   check('unlocked: words must start the same – "catalogue"/"reset" unlock nothing', P.unlockedTopics().length === 0);
 

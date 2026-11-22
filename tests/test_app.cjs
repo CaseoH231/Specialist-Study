@@ -12,6 +12,8 @@ const BASE = 'http://localhost:8767/';
   const ai = fakeAI((msgs) => {
     if (msgs[0].content.includes('You sort photos')) { sorts++; return { path: ['Complex numbers', 'Polar form'], title: `Ex 2C part ${sorts}` }; }
     const id = msgs[0].content.match(/\((p-[a-z0-9]+)\)/)[1];
+    if (msgs[msgs.length - 1].content.includes('unlock')) // asking the helper to unlock formulas
+      return { reply: 'Unlocking it.', actions: [{ type: 'unlock_formula', name: 'modulus' }, { type: 'unlock_formula', name: 'made-up formula' }] };
     if (msgs[msgs.length - 1].content.includes('by name')) { // how the free AI often answers: names, titles, brackets
       const other = msgs[0].content.match(/\((p-[a-z0-9]+)\) My renamed photo/)[1];
       return { reply: 'Moving them.', actions: [{ type: 'move_photo', photo: 'Ex 2C part 2', topic: 'Proof' },
@@ -83,6 +85,18 @@ const BASE = 'http://localhost:8767/';
   console.log('helper lines:', lines);
   check('owner: the helper’s moves work with names, titles, paths and brackets (and make missing topics)', !lines.includes('?') && lines.includes('to Polar form')
     && P3('Ex 2C part 2').topic === T3('Proof') && P3('My renamed photo').topic === T3('Statistics') && !!T3('Statistics'));
+
+  // Asking the helper to unlock a formula.
+  await o.fill('#bot-input', 'please unlock it, it is on my photo'); await o.press('#bot-input', 'Enter');
+  await o.waitForSelector('.proposal:not(.done) [data-do]');
+  const ulines = await o.$$eval('.proposal:not(.done) li', (x) => x.map((e) => e.textContent).join(' | '));
+  await o.click('.proposal:not(.done) [data-do]'); await o.waitForFunction(() => !document.querySelector('.proposal:not(.done)'));
+  const unl = JSON.parse(gh.text('data/library.json')).unlocked || [];
+  check('owner: the helper unlocks a formula on request (and says when one doesn’t exist)', JSON.stringify(unl) === '["Modulus"]'
+    && ulines.includes('✕ There') && ulines.includes('Unlock the formula'));
+  await o.goto(BASE + '#/formulas'); await o.waitForSelector('.f-card');
+  check('owner: the unlocked formula now shows on the sheet', (await o.$$eval('.f-card header b', (x) => x.map((e) => e.textContent))).join() === 'Modulus');
+  await o.goto(BASE);
 
   // ---- a friend ----
   const f = await page();

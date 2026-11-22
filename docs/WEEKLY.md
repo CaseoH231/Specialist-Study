@@ -11,6 +11,10 @@ Once a week (Sunday night, scheduled) Claude reads the new photos and writes not
 3. For each photo, open the image file (e.g. `photos/p-xxxx.jpg`) and look at it carefully. Write its notes to a
    scratch file **outside the repo**, then save them:
    `python3 tools/notes.py set p-xxxx /path/to/notes.md`
+   Then tag the formula-sheet entries that are **explicitly written** on the photo (a formula used or written out, not one
+   that's merely related): `python3 tools/notes.py formula-names` lists them, and
+   `python3 tools/notes.py formulas p-xxxx "Name one" "Name two"` saves them. Only these unlock on the formula sheet –
+   be strict; leave it empty if no sheet formula is shown.
 4. `python3 tools/notes.py check` and `bash tests/run_tests.sh` must pass.
 5. Commit only `data/library.json`, message `Weekly notes: N photos`, and push to `main`.
    If the push is refused because the app saved something meanwhile: `git pull --rebase`. If `data/library.json`
