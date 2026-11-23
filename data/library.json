@@ -1,6 +1,6 @@
 {
  "version": 1,
- "updatedAt": "2026-11-23T00:21:00.507Z",
+ "updatedAt": "2026-11-23T00:21:23.434Z",
  "topics": [
   {
    "id": "t-mwojd6uir0aw",
@@ -24,6 +24,17 @@
    "name": "Number sets and Venn diagrams",
    "color": "#1d4ed8",
    "parent": "t-mwojd6uir0aw"
+  },
+  {
+   "id": "t-mwsit0lxsv36",
+   "name": "Algebra",
+   "color": "#1d4ed8"
+  },
+  {
+   "id": "t-mwsit0lxz23m",
+   "name": "Systems of linear equations",
+   "color": "#7c3aed",
+   "parent": "t-mwsit0lxsv36"
   }
  ],
  "photos": [
@@ -69,6 +80,17 @@
     "Complement",
     "Union and intersection"
    ]
+  },
+  {
+   "id": "p-mwsisqe25505",
+   "topic": "t-mwsit0lxz23m",
+   "title": "Solving simultaneous equations using elimination method",
+   "added": "2026-11-23",
+   "file": "photos/p-mwsisqe25505.jpg",
+   "w": 2000,
+   "h": 1500,
+   "by": "d-mwsirsj5stxu",
+   "byName": "test"
   }
  ],
  "events": [],
