@@ -25,7 +25,7 @@ export async function sort(request, env) {
   if (request.method !== 'POST') return json({ error: 'method' }, 405);
   if (!env.AI) return json({ error: 'not-set-up' }, 503);
   const who = access(request, env);
-  if (!who.owner) return refuse(who, json);
+  if (!who.member) return refuse(who, json); // the owner or anyone with the class code
   if (Number(request.headers.get('content-length') || 0) > 4e6) return json({ error: 'too-big' }, 413);
   let body;
   try { body = await request.json(); } catch { return json({ error: 'bad-request' }, 400); }

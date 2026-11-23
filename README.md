@@ -12,17 +12,18 @@ Live at **https://specialist-study.adrian11jonker.workers.dev** – installable 
 - **Formula sheet** – only formulas for what you've uploaded; more unlock as you upload. Searchable, star the ones you forget, printable.
 - **Planner** – SAC/test dates with countdowns. The owner's are shared with everyone; friends can add their own.
 - **Confidence** – mark each topic 🔴 / 🟡 / 🟢; home shows what to revise first. **Share** a link to any topic or photo, or **print** a topic as a PDF.
-- **Friends** who open the link see your photos and notes (read-only). Photos they upload stay on their own device.
+- **One shared collection** – everyone with the class code adds photos to the same library (sorted by the AI, tagged with their name) and everyone sees them. Without a code you can look and practise but not add.
 
 ## Setting up (Cloudflare → Workers → specialist-study → Settings → Variables and secrets)
 
 | Secret | What |
 |---|---|
 | `GITHUB_TOKEN` | Fine-grained GitHub token, **Contents: Read and write** on `CaseoH231/Specialist-Study` only |
-| `APP_PASSCODE` | Your passcode – needed to upload or change anything |
+| `APP_PASSCODE` | Your owner passcode – can change anything |
+| `SHARE_CODE` | The class code you give friends – lets them add photos, topics and dates to the shared collection (and change only what they added) |
 | `OWNER_IPS` | Optional: your home address(es) for the AI features (the app shows the value under ⋯ More → This device) |
 
-Then on your laptop: ⋯ More → **Log in as owner…** and enter the passcode once. On someone else's laptop, use ⋯ More → **Log out (owner)** when you're done.
+Then: ⋯ More → **Log in (class code or owner)…** – your passcode on your devices, the class code on friends'. On someone else's laptop, use ⋯ More → **Log out (owner)** when you're done.
 
 ## Files
 

@@ -4,6 +4,7 @@
 const { chromium } = require('playwright');
 const path = require('path'), fs = require('fs'), os = require('os');
 const { fakeGitHub, fakeAI } = require('./fakes.cjs');
+const APP_KEY = 'specialist-study';
 const BASE = 'http://localhost:8767/';
 (async () => {
   const { handleApi } = await import(path.join(__dirname, '..', 'worker', 'api.js'));
@@ -21,12 +22,12 @@ const BASE = 'http://localhost:8767/';
     }
     return { reply: 'I can move it to a new Proof topic.', actions: [{ type: 'add_topic', key: 'new-1', name: 'Proof', parent: '' }, { type: 'move_photo', photo: id, topic: 'new-1' }] };
   });
-  const env = { GITHUB_TOKEN: 'ghp_test', APP_PASSCODE: 'pw', AI: ai };
+  const env = { GITHUB_TOKEN: 'ghp_test', APP_PASSCODE: 'pw', SHARE_CODE: 'class', AI: ai };
   const checks = []; const check = (n, ok) => checks.push(`${ok ? 'ok  ' : 'FAIL'} ${n}`);
   const b = await chromium.launch(); const errs = [];
-  async function page() {
+  async function page({ code = 'pw', name = 'Owner' } = {}) {
     const ctx = await b.newContext({ viewport: { width: 1280, height: 860 }, serviceWorkers: 'block' }); const p = await ctx.newPage();
-    p.on('pageerror', (e) => errs.push(e.message)); p.on('dialog', (d) => d.accept(d.type() === 'prompt' ? 'pw' : undefined));
+    p.on('pageerror', (e) => errs.push(e.message)); p.on('dialog', (d) => d.accept(d.type() !== 'prompt' ? undefined : /code|passcode/i.test(d.message()) ? code : name));
     await p.route(/\/(api|photo)\//, async (route) => {
       const r = route.request();
       const res = await handleApi(new Request(r.url(), { method: r.method(), headers: { ...r.headers(), 'cf-connecting-ip': '198.51.100.9' }, body: r.method() === 'POST' ? r.postData() : undefined }), env);
@@ -98,48 +99,61 @@ const BASE = 'http://localhost:8767/';
   check('owner: the unlocked formula now shows on the sheet', (await o.$$eval('.f-card header b', (x) => x.map((e) => e.textContent))).join() === 'Modulus');
   await o.goto(BASE);
 
-  // ---- a friend ----
-  const f = await page();
+  // ---- a friend: looks first, then joins with the class code and adds to the shared collection ----
+  const f = await page({ code: 'class', name: 'Sam' });
   await f.goto(BASE); await f.waitForSelector('#main .hello'); await f.waitForTimeout(300);
   const fTopics = await f.$$eval('#topics .topic .nm', (x) => x.map((e) => e.textContent).join('|'));
-  check('friend: sees the owner’s topics', fTopics.includes('Complex numbers') && fTopics.includes('Proof'));
+  check('friend: sees the shared topics', fTopics.includes('Complex numbers') && fTopics.includes('Proof'));
   await f.click('#topics .topic:has-text("Complex numbers")');
-  check('friend: can’t edit the owner’s topics', !(await f.$('[data-act="rename-topic"]')));
-  const before = gh.text('data/library.json'), puts = gh.log.length;
-  await f.setInputFiles('#file-pick', [shots[0]]);
-  await f.waitForSelector('#up-done:not([disabled])');
-  check('friend: their upload stays on their device', (await f.textContent('.up-row .st')).includes('this device') && gh.log.length === puts && gh.text('data/library.json') === before);
+  check('friend: can’t rename or delete topics', !(await f.$('[data-act="rename-topic"]')));
+  const puts = gh.log.length, count0 = JSON.parse(gh.text('data/library.json')).photos.length;
+  await f.setInputFiles('#file-pick', [shots[0]]);          // asks for the class code, then their name
+  await f.waitForSelector('#up-done:not([disabled])', { timeout: 20000 });
+  const libF = JSON.parse(gh.text('data/library.json')), added = libF.photos[libF.photos.length - 1];
+  check('friend: with the class code, their upload goes into the shared collection, with their name', libF.photos.length === count0 + 1
+    && gh.log.length > puts && added.byName === 'Sam' && /^d-/.test(added.by) && (await f.textContent('.up-row .st')).startsWith('Saved in'));
+  check('friend: shows as a member', (await f.textContent('#sub')).includes('Member'));
   await f.click('#up-done'); await f.waitForSelector('.photo-page');
-  check('friend: their photo shows, marked as theirs', (await f.textContent('.lead')).includes('only on this device') && await f.$eval('.shot img', (i) => i.src.startsWith('blob:')));
-  await f.reload(); await f.waitForTimeout(800);
-  check('friend: it’s still there after a reload', await f.$eval('.shot img', (i) => i.src.startsWith('blob:') && i.naturalWidth > 100).catch(() => false));
-  await f.evaluate(() => document.querySelector('[data-act="delete-photo"]').click()); await f.waitForTimeout(400);
-  check('friend: can remove their own photo', (await f.evaluate(() => window.__app.mine.photos.length)) === 0);
+  check('friend: can change their own photo, and it says who added it', !!(await f.$('[data-act="rename-photo"]')) && (await f.textContent('.lead')).includes('added by Sam'));
+  const ownerPhoto = libF.photos.find((p) => p.byName !== 'Sam');
+  await f.goto(BASE + '#/photo/' + ownerPhoto.id); await f.waitForSelector('.photo-page');
+  check('friend: can’t change someone else’s photo', !(await f.$('[data-act="delete-photo"]')));
+  // The Worker enforces it too, whatever the app does.
+  const sneaky = await f.evaluate(async (id) => (await fetch('api/change', { method: 'POST', headers: { 'content-type': 'application/json', 'x-passcode': 'class', 'x-device': 'd-someoneelse' },
+    body: JSON.stringify({ ops: [{ type: 'delete_photo', photo: id }] }) })).status, ownerPhoto.id);
+  check('friend: the server refuses to let a member delete another person’s photo', sneaky === 403 && JSON.parse(gh.text('data/library.json')).photos.some((p) => p.id === ownerPhoto.id));
   // Choosing topics in the upload list, then Done (this once did nothing after making a new topic).
   await f.goto(BASE); await f.waitForSelector('#main .hello');
   await f.setInputFiles('#file-pick', shots);
-  await f.waitForSelector('#up-done:not([disabled])');
+  await f.waitForSelector('#up-done:not([disabled])', { timeout: 20000 });
   const owners = await f.$eval('select[data-topic="0"]', (s) => [...s.options].find((o) => o.textContent.includes('Complex numbers')).value);
   await f.selectOption('select[data-topic="0"]', owners);
-  await f.selectOption('select[data-topic="1"]', '__new');   // the prompt answers "pw", so a topic called "pw"
-  await f.waitForFunction(() => [...document.querySelectorAll('select[data-topic="1"] option')].some((o) => o.selected && o.textContent.trim() === 'pw'));
-  await f.click('#up-done'); await f.waitForTimeout(500);
-  const mineNow = await f.evaluate(() => window.__app.mine);
-  const pwTopic = mineNow.topics.find((t) => t.name === 'pw');
-  check('friend: Done puts each photo in the topic chosen (an owner topic, and a new one)', !!pwTopic && mineNow.photos.length === 2
-    && mineNow.photos[0].topic === owners && mineNow.photos[1].topic === pwTopic.id && !(await f.$('dialog[open]')));
-  check('friend: the helper button shows when the site has a passcode to unlock it', await f.$eval('#bot-btn', (b) => getComputedStyle(b).display !== 'none'));
-  // Logging in as owner on this device: its own photos can be added to the shared library.
-  const before2 = JSON.parse(gh.text('data/library.json')).photos.length;
-  await f.evaluate(() => localStorage.setItem('specialist-study-pass', JSON.stringify('pw'))); await f.goto(BASE); await f.reload();
-  await f.waitForSelector('[data-act="adopt"]'); await f.click('[data-act="adopt"]');
+  await f.selectOption('select[data-topic="1"]', '__new');   // the prompt answers "Sam", so a topic called "Sam"
+  await f.waitForFunction(() => [...document.querySelectorAll('select[data-topic="1"] option')].some((o) => o.selected && o.textContent.trim() === 'Sam'));
+  await f.click('#up-done'); await f.waitForTimeout(800);
+  const libD = JSON.parse(gh.text('data/library.json')), samTopic = libD.topics.find((t) => t.name === 'Sam'), last2 = libD.photos.slice(-2);
+  check('friend: Done puts each photo in the topic chosen (an existing one, and a new shared one)', !!samTopic && last2[0].topic === owners && last2[1].topic === samTopic.id
+    && !(await f.$('dialog[open]')));
+  check('friend: the helper button shows for members', await f.$eval('#bot-btn', (b) => getComputedStyle(b).display !== 'none'));
+  // Photos kept on this device from before can be added to the shared collection.
+  await f.evaluate(async (db) => {
+    const c = document.createElement('canvas'); c.width = 400; c.height = 300; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 400, 300); g.fillStyle = '#000'; g.fillText('old photo', 20, 40);
+    const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.8));
+    await new Promise((ok, no) => { const r = indexedDB.open(db, 1); r.onupgradeneeded = () => r.result.createObjectStore('photos');
+      r.onsuccess = () => { const tx = r.result.transaction('photos', 'readwrite'); tx.objectStore('photos').put(blob, 'my-pold1'); tx.oncomplete = ok; tx.onerror = no; }; });
+    const mine = { topics: [{ id: 'my-photos', name: 'My photos', color: '#0f766e' }], photos: [{ id: 'my-pold1', topic: 'my-photos', title: 'Old photo', added: '2026-11-01', w: 400, h: 300 }], events: [] };
+    localStorage.setItem(`${db}-mine-v1`, JSON.stringify(mine));
+  }, APP_KEY);
+  await f.goto(BASE); await f.reload(); await f.waitForSelector('[data-act="adopt"]'); await f.click('[data-act="adopt"]');
   const target = await f.$eval('#adopt-to', (s) => [...s.options].find((o) => o.textContent.includes('Proof')).value);
   await f.selectOption('#adopt-to', target); await f.click('#adopt-go');
   await f.waitForFunction(() => !document.querySelector('dialog[open]'));
-  const lib4 = JSON.parse(gh.text('data/library.json'));
-  const mine4 = await f.evaluate(() => window.__app.mine);
-  check('owner login: photos only on this device can be added to the shared library (and leave the device)', lib4.photos.length === before2 + 2
-    && lib4.photos.slice(-2).every((p) => p.topic === target) && mine4.photos.length === 0 && !(await f.$('[data-act="adopt"]')));
+  const lib4 = JSON.parse(gh.text('data/library.json')), old = lib4.photos.find((p) => p.title === 'Old photo');
+  check('friend: photos only on this device can be added to the shared collection (and leave the device)', !!old && old.topic === target && old.byName === 'Sam'
+    && (await f.evaluate(() => window.__app.mine.photos.length)) === 0 && !(await f.$('[data-act="adopt"]')));
+  // Log out: back to look-only.
+  await f.evaluate(() => document.querySelector('#btn-owner').click()); await f.waitForFunction(() => !document.querySelector('#sub').textContent.includes('Member'));
+  check('friend: logging out goes back to look-only', (await f.textContent('#btn-owner')).startsWith('Log in'));
 
   // ---- a phone ----
   const ph = await (await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: 'block' })).newPage();

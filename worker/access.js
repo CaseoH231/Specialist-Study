@@ -2,6 +2,7 @@
 //   OWNER_IPS     – optional secret: the owner's internet address(es), comma-separated. Exact addresses, or ranges
 //                   like 203.0.113.0/24 or 2001:db8:1:2::/64 (home IPv6 addresses change often, so use the /64 the app suggests).
 //   APP_PASSCODE  – optional secret: a passcode that also unlocks them, from any network.
+//   SHARE_CODE    – optional secret: the class code friends use to add to the shared collection (members).
 // With neither set, anyone can use them. Friends' own photos never touch the server: they stay on their device.
 
 const expand6 = (ip) => {
@@ -43,8 +44,12 @@ export function access(request, env) {
   const passOk = !!env.APP_PASSCODE && request.headers.get('x-passcode') === env.APP_PASSCODE;
   const ipOk = rules.some((r) => ipMatches(ip, r));
   const locked = rules.length > 0 || !!env.APP_PASSCODE;
-  return { ip, owner: !locked || ipOk || passOk, locked, ipLocked: rules.length > 0, hasPasscode: !!env.APP_PASSCODE, suggest: suggestRule(ip) };
+  const shareOk = !!env.SHARE_CODE && request.headers.get('x-passcode') === env.SHARE_CODE;
+  const owner = !locked || ipOk || passOk;
+  // role: 'owner' changes anything; 'member' (class code) adds to the shared collection; null only looks.
+  return { ip, owner, member: owner || shareOk, role: owner ? 'owner' : shareOk ? 'member' : null, locked, ipLocked: rules.length > 0,
+    hasPasscode: !!env.APP_PASSCODE, hasShareCode: !!env.SHARE_CODE, suggest: suggestRule(ip) };
 }
 
 // The answer to send when someone isn't allowed: ask for the passcode if there is one, otherwise just say no.
-export const refuse = (a, json) => (a.hasPasscode ? json({ error: 'passcode' }, 401) : json({ error: 'not-owner' }, 403));
+export const refuse = (a, json) => (a.hasPasscode || a.hasShareCode ? json({ error: 'passcode' }, 401) : json({ error: 'not-owner' }, 403));

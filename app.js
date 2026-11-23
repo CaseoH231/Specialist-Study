@@ -1,11 +1,11 @@
 // Specialist Study – photos of Specialist Maths work, sorted into topics, with notes underneath.
 //
-// Two kinds of device:
-//   • The owner (has the passcode saved, or is on an OWNER_IPS address): the library lives on GitHub
-//     (data/library.json + photos/). Uploads and changes go through the Worker, so every device – and the
-//     Sunday notes job – sees the same thing.
-//   • Everyone else (friends): they see the owner's library, read-only, and can add photos of their own.
-//     Theirs stay on their device only (IndexedDB), never on the server.
+// One shared collection on GitHub (data/library.json + photos/), changed through the Worker:
+//   • The owner (owner passcode, or an OWNER_IPS address) can change anything.
+//   • Members (the class code, SHARE_CODE) add photos, topics and dates to the same collection, and can change or
+//     remove the photos and dates they added. Each photo remembers who added it (device id + name).
+//   • Anyone else can look, practise and keep their own planner dates, but not add to the collection.
+// Photos kept on a device from before (IndexedDB, ids "my-…") can be added to the collection in one go.
 import { loadCourse, courseHtml, bindCourse, courseCount } from './course.js';
 import { applyOps, emptyLibrary, topicOf, photoOf, kids, ancestors, pathOf, below, treeOrder, outline, formatNotes, COLORS, KINDS } from './lib.js';
 import { practiceHtml, bindPractice, practiceStats, currentQuestion } from './practice.js';
@@ -24,6 +24,14 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* full or blocked */ } },
 };
 const passcode = () => store.get(K.pass, '') || '';
+const KEY = K.pass.replace(/-pass$/, '');
+const deviceId = () => { let d = store.get(`${KEY}-device`); if (!d) { d = rid('d-'); store.set(`${KEY}-device`, d); } return d; };
+const myName = () => store.get(`${KEY}-name`, '') || '';
+function askName() {
+  const n = prompt('Your name – it’s shown on the photos you add:', myName());
+  if (n && n.trim()) store.set(`${KEY}-name`, n.trim().slice(0, 40));
+  return myName();
+}
 
 // ---------- data ----------
 let server = store.get(K.lib) || emptyLibrary();   // the owner's library (a saved copy, refreshed from the Worker)
@@ -36,9 +44,12 @@ const PAGES = { practice: ['✎', 'Practice'], formulas: ['∑', 'Formulas'], pl
 const openFolders = new Set(store.get(K.open, []));
 const localUrls = new Map();                        // id → object URL of a photo kept on this device
 
-const isOwner = () => !!passcode() || !!(who?.owner && who?.locked);
+// role: 'owner' | 'member' | null – from the Worker (saved for offline use).
+const role = () => (who ? who.role || null : store.get(`${K.pass.replace(/-pass$/, '')}-role`, null));
+const isOwner = () => role() === 'owner';
+const isMember = () => !!role(); // owner or class code: can add to the shared collection
 // The AI features (sorting, helper): when the Worker allows this device, or there's a passcode that unlocks them.
-const aiOk = () => !!who?.ai && (!!who.owner || !!who.hasPasscode);
+const aiOk = () => !!who?.ai && (isMember() || !!who.hasPasscode || !!who.hasShareCode);
 const isMine = (id) => String(id).startsWith('my-');
 // Everything shown: the owner's library plus this device's own photos.
 function view() {
@@ -93,11 +104,11 @@ async function callApi(path, body, { askPass = true } = {}) {
   let res = null, data = {};
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-passcode': passcode() }, body: JSON.stringify(body) });
+      res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-passcode': passcode(), 'x-device': deviceId(), 'x-name': encodeURIComponent(myName()) }, body: JSON.stringify(body) });
       data = await res.json().catch(() => ({}));
     } catch { res = null; data = {}; }
     if (res?.status !== 401 || !askPass) break;
-    const p = prompt(attempt ? 'That passcode didn’t work. Try again:' : 'Enter your passcode (it’s saved on this device):');
+    const p = prompt(attempt ? 'That code didn’t work. Try again:' : 'Enter the class code (or the owner passcode) – it’s saved on this device:');
     if (!p) return { res, data, cancelled: true };
     store.set(K.pass, p.trim());
   }
@@ -107,7 +118,8 @@ const problem = (res, data) => (!res ? 'No internet connection.'
   : data.error === 'not-set-up' ? 'The site isn’t set up for this yet (GITHUB_TOKEN / APP_PASSCODE secrets).'
   : data.error === 'bad-token' ? 'GitHub refused the save – the GITHUB_TOKEN secret may have expired.'
   : data.error === 'daily-limit' ? 'The free AI has run out for today – try again tomorrow.'
-  : data.error === 'passcode' ? 'Wrong passcode.' : `Something went wrong (${res.status}).`);
+  : data.error === 'not-allowed' ? 'Only the owner, or whoever added it, can change that.'
+  : data.error === 'passcode' ? 'Wrong code.' : `Something went wrong (${res.status}).`);
 
 async function refresh({ quiet = true } = {}) {
   try {
@@ -122,8 +134,9 @@ async function refresh({ quiet = true } = {}) {
 }
 async function checkWho() {
   try { const r = await fetch('api/whoami', { headers: { 'x-passcode': passcode() } }); who = r.ok ? await r.json() : null; } catch { who = null; }
+  if (who) store.set(`${KEY}-role`, who.role || null);
   document.body.classList.toggle('no-ai', !aiOk());
-  $('#btn-owner').textContent = passcode() ? 'Log out (owner)' : 'Log in as owner…';
+  $('#btn-owner').textContent = passcode() ? `Log out (${isOwner() ? 'owner' : 'class code'})` : 'Log in (class code or owner)…';
 }
 
 // Change things. The owner's changes are saved to GitHub; a friend's go to their own copy.
@@ -138,7 +151,7 @@ async function change(ops, { quiet = false } = {}) {
     mine = { topics: lib.topics.filter((t) => isMine(t.id)), photos: lib.photos, events: lib.events }; saveMine();
   }
   if (forServer.length) {
-    if (!isOwner()) { toast('Only the owner can change their photos.'); return false; }
+    if (!isMember()) { toast('Log in with the class code to add to the shared collection.'); return false; }
     applyOps(server, structuredClone(forServer)); V = view(); render(); // show it straight away
     const { res, data, cancelled } = await callApi('api/change', { ops: forServer });
     if (cancelled || !res?.ok) { toast(cancelled ? 'Not saved.' : `Not saved: ${problem(res, data)}`); await refresh(); return false; }
@@ -155,7 +168,7 @@ async function change(ops, { quiet = false } = {}) {
 function isMineOp(o) {
   if (o.type === 'add_topic') return isMine(o.id);
   if (o.type === 'add_photo') return isMine(o.photo.id);
-  if (o.type === 'add_path') return !isOwner();
+  if (o.type === 'add_path') return !isMember();
   if (o.type === 'unlock_formula' || o.type === 'lock_formula') return false; // the shared library
   if (o.type === 'add_event') return isMine(o.event.id);
   if (o.type === 'delete_event') return isMine(o.event);
@@ -167,9 +180,9 @@ function isMineOp(o) {
 // Photos uploaded on this device before logging in as owner: copy them into the shared library, then drop the device copies.
 async function adoptPhotos() {
   const list = [...mine.photos];
-  if (!list.length || !isOwner()) return;
+  if (!list.length || !isMember()) return;
   const keep = list.find((p) => topicOf(server, p.topic))?.topic || '';
-  showDialog(`<div class="dlg-head"><h2 class="grow">Add to your shared library</h2><button class="link" data-close>✕</button></div>
+  showDialog(`<div class="dlg-head"><h2 class="grow">Add to the shared collection</h2><button class="link" data-close>✕</button></div>
     <div class="dlg-body form"><div class="up-list">${list.map((p) => `<div class="up-row"><img src="${src(p)}" alt=""><div><b>${esc(p.title)}</b>
       <span class="st">now in ${esc(pathOf(V, T(p.topic)) || '?')}</span></div></div>`).join('')}</div>
       <label>Put them in<select id="adopt-to"><option value="__keep">Where they are now (if it’s one of your topics), otherwise Unsorted</option>
@@ -201,7 +214,7 @@ async function adoptPhotos() {
       saveMine(); V = view();
     }
     dlg.close(); render();
-    toast(ops.length ? `Added ${plural(ops.length, 'photo')} to your shared library ✓` : 'Nothing was added.');
+    toast(ops.length ? `Added ${plural(ops.length, 'photo')} to the shared collection ✓` : 'Nothing was added.');
   };
 }
 
@@ -226,7 +239,9 @@ const topicOptions = (sel, { ownerOnly = false } = {}) => treeOrder(V).filter(({
   .map(({ t, depth }) => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${'  '.repeat(depth)}${depth ? '└ ' : ''}${esc(t.name)}</option>`).join('');
 
 async function upload(files, hint) {
-  const owner = isOwner();
+  if (!isMember() && !(await logIn())) return; // adding needs the class code (or the owner passcode)
+  if (!myName()) askName();
+  const owner = isMember(); // everyone's photos go into the shared collection
   const rows = files.map((f) => ({ file: f, id: owner ? rid('p-') : rid('my-p'), title: f.name.replace(/\.[^.]+$/, ''), topic: hint, status: 'Waiting…', url: URL.createObjectURL(f) }));
   const draw = () => {
     const done = rows.every((r) => r.state);
@@ -316,7 +331,7 @@ function ensureMyPhotos() {
 }
 async function newTopic(name, parent) {
   name = String(name || '').trim(); if (!name) return null;
-  const own = !isOwner() || (parent && isMine(parent));
+  const own = !isMember() || (parent && isMine(parent));
   const id = own ? rid('my-t') : rid('t-');
   const ok = await change([{ type: 'add_topic', id, name, parent: parent || null }], { quiet: true });
   return ok ? id : null;
@@ -330,7 +345,8 @@ let toastTimer;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3200); }
 
 const FOLDER = '<svg class="fold" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
-const canEdit = (id) => isMine(id) || isOwner();
+const canEditTopic = (id) => isMine(id) || isOwner();                                   // topics: the owner
+const canEditPhoto = (p) => !!p && (p.mine || isOwner() || (!!p.by && p.by === deviceId())); // photos: the owner or whoever added it
 
 function navTree(id = null, depth = 0) {
   const trail = current === HOME ? [] : [...ancestors(V, T(current) || {}), T(current)].filter(Boolean).map((t) => t.id);
@@ -344,7 +360,7 @@ function navTree(id = null, depth = 0) {
 }
 const pcard = (p) => `<a class="pcard" href="#/photo/${encodeURIComponent(p.id)}"><div class="pic"><img src="${src(p)}" alt="" loading="lazy"></div>
   ${p.notes ? '<span class="tag">📝 Notes</span>' : ''}${p.mine ? '<span class="tag mine">Yours</span>' : ''}
-  <div class="body"><b>${esc(p.title)}</b><small>${esc(day(p.added))}${current === HOME || query ? ` · ${esc(T(p.topic)?.name || '')}` : ''}</small></div></a>`;
+  <div class="body"><b>${esc(p.title)}</b><small>${esc(day(p.added))}${current === HOME || query ? ` · ${esc(T(p.topic)?.name || '')}` : ''}${p.byName ? ` · ${esc(p.byName)}` : ''}</small></div></a>`;
 function folderCard(t) {
   const subs = kids(V, t.id), ps = photosIn(t.id);
   return `<a class="tcard" href="#/topic/${encodeURIComponent(t.id)}" style="--c:${t.color}">${confOf(t.id) ? `<span class="conf-dot c${confOf(t.id)}" title="${CONF_LABEL[confOf(t.id)]}"></span>` : ''}<h3>${FOLDER}${esc(t.name)}</h3>
@@ -358,7 +374,7 @@ function render() {
   setFormulas([...server.photos.flatMap((p) => p.formulas || []), ...(server.unlocked || [])]); // explicitly on a photo, or unlocked on request
   if (current !== HOME && !T(current)) current = HOME;
   if (photoId && !P(photoId)) photoId = null;
-  $('#sub').textContent = `${plural(V.photos.length, 'photo')} · ${plural(V.topics.length, 'topic')}${passcode() ? ' · 🔑 Owner' : ''}`;
+  $('#sub').textContent = `${plural(V.photos.length, 'photo')} · ${plural(V.topics.length, 'topic')}${isOwner() ? ' · 🔑 Owner' : isMember() ? ' · 👥 Member' : ''}`;
   const nextEv = upcoming()[0];
   const badge = { course: courseCount() || '', practice: practiceStats().streak ? `🔥${practiceStats().streak}` : '', planner: nextEv ? countdown(nextEv.date, true) : '', formulas: '' };
   $('#topics').innerHTML = `<button class="topic home ${current === HOME && !query && !photoId && !page ? 'on' : ''}" data-topic="${HOME}"><span class="ico">⌂</span><span class="nm">Home</span></button>
@@ -398,12 +414,12 @@ const upcoming = () => V.events.filter((e) => daysTo(e.date) >= 0);
 const KIND_ICON = { SAC: '📝', Test: '🧪', Exam: '🎓', Assignment: '📎', Other: '📌' };
 const evRow = (e) => `<li class="ev ${daysTo(e.date) <= 3 && daysTo(e.date) >= 0 ? 'soon' : ''}"><span class="ev-ico">${KIND_ICON[e.kind] || '📌'}</span>
   <span class="ev-main"><b>${esc(e.title)}</b><small>${esc(new Date(`${e.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }))} · ${e.kind}${e.mine ? ' · only you' : ' · shared'}</small></span>
-  <span class="ev-when">${countdown(e.date)}</span>${(e.mine || isOwner()) ? `<button class="link danger" data-delev="${e.id}" aria-label="Remove ${esc(e.title)}">✕</button>` : ''}</li>`;
+  <span class="ev-when">${countdown(e.date)}</span>${(e.mine || isOwner() || (e.by && e.by === deviceId())) ? `<button class="link danger" data-delev="${e.id}" aria-label="Remove ${esc(e.title)}">✕</button>` : ''}</li>`;
 function plannerHtml() {
   const up = upcoming(), past = V.events.filter((e) => daysTo(e.date) < 0).reverse();
   return `<nav class="crumbs" aria-label="You are here"><a href="#/">Home</a> <span>›</span> <b>Planner</b></nav>
     <div class="bar"><h2>Planner</h2></div>
-    <p class="lead">${isOwner() ? 'Dates you add here are shared – your friends see them too.' : 'Dates from the owner show up here; ones you add are just for you.'}</p>
+    <p class="lead">${isMember() ? 'Dates you add here are shared with everyone.' : 'Shared dates show up here. Log in with the class code to add shared ones – dates you add now are just for you.'}</p>
     <form class="ev-form" id="ev-form"><input name="title" required maxlength="80" placeholder="e.g. SAC 2 – Calculus" aria-label="What">
       <input name="date" type="date" required aria-label="Date" value="${todayIso()}"><select name="kind" aria-label="Type">${KINDS.map((k) => `<option>${k}</option>`).join('')}</select>
       <button class="primary">Add</button></form>
@@ -413,9 +429,9 @@ function plannerHtml() {
 function bindPlanner(main) {
   main.querySelector('#ev-form').onsubmit = async (ev) => {
     ev.preventDefault();
-    const f = new FormData(ev.target), own = !isOwner();
+    const f = new FormData(ev.target), own = !isMember();
     const e = { id: own ? rid('my-e') : rid('e-'), title: f.get('title'), date: f.get('date'), kind: f.get('kind') };
-    if (await change([{ type: 'add_event', event: e }], { quiet: true })) toast(own ? 'Added ✓' : 'Added – your friends see it too ✓');
+    if (await change([{ type: 'add_event', event: e }], { quiet: true })) toast(own ? 'Added ✓' : 'Added – everyone sees it ✓');
   };
   main.onclick = async (ev) => {
     const d = ev.target.closest('[data-delev]');
@@ -465,9 +481,9 @@ function home() {
     </div>
     <div class="tool-row">${tile('practice', unlockedTopics().length ? `On ${unlockedTopics().length === 1 ? unlockedTopics()[0] : `${unlockedTopics().length} of your topics`}` : '🔒 Unlocks as you upload')}${tile('formulas', formulaCount() ? `${formulaCount()} from your uploads` : '🔒 Unlocks as you upload')}${tile('planner', 'SACs & tests')}</div>
     ${weak.length ? `<section class="panel revise"><h3>Revise these first</h3><p>Topics you marked 🔴 Need help.</p><div class="chips">${weak.map((t) => `<a class="chip ask" href="#/topic/${encodeURIComponent(t.id)}">${esc(t.name)}</a>`).join('')}</div></section>` : ''}
-    ${isOwner() && mine.photos.length ? `<div class="hint warnbox adopt"><b>${plural(mine.photos.length, 'photo')} ${mine.photos.length === 1 ? 'is' : 'are'} only on this device</b>
-      – uploaded before you logged in as owner, so they’re not in your shared library (and won’t get weekly notes).
-      <button class="primary" data-act="adopt">Add ${mine.photos.length === 1 ? 'it' : 'them'} to your shared library…</button></div>` : ''}
+    ${isMember() && mine.photos.length ? `<div class="hint warnbox adopt"><b>${plural(mine.photos.length, 'photo')} ${mine.photos.length === 1 ? 'is' : 'are'} only on this device</b>
+      – added before you logged in, so ${mine.photos.length === 1 ? 'it’s' : 'they’re'} not in the shared collection (and won’t get weekly notes).
+      <button class="primary" data-act="adopt">Add ${mine.photos.length === 1 ? 'it' : 'them'} to the shared collection…</button></div>` : ''}
     <a class="c-link" href="#/course"><span class="c-ico">📘</span><span><b>Study design &amp; work plan</b>
       <small>${courseCount() ? `${courseCount()} document${courseCount() === 1 ? '' : 's'} – what you’re learning this year, and when` : 'What you’re learning this year, and when'}</small></span></a>
     ${ps.length ? `<h3 class="sect-h">Recently added</h3><div class="strip">${ps.slice(-10).reverse().map(pcard).join('')}</div>` : ''}
@@ -483,7 +499,7 @@ function crumbs(t, last = true) {
 }
 function topicPage() {
   const t = T(current), subs = kids(V, t.id), here = V.photos.filter((p) => p.topic === t.id), all = photosIn(t.id);
-  const edit = canEdit(t.id);
+  const edit = canEditTopic(t.id);
   return `${crumbs(t)}
     <div class="bar" style="--c:${t.color}"><h2><span class="tdot"></span>${esc(t.name)}</h2><div class="tools">
       ${edit ? `<details class="more topic-menu"><summary aria-label="Topic options">⋯</summary><div class="menu">
@@ -500,14 +516,14 @@ function topicPage() {
 const siblings = (p) => V.photos.filter((x) => x.topic === p.topic);
 function photoPage() {
   const p = P(photoId), t = T(p.topic), list = siblings(p), i = list.indexOf(p);
-  const prev = list[i - 1], next = list[i + 1], edit = canEdit(p.id);
+  const prev = list[i - 1], next = list[i + 1], edit = canEditPhoto(p);
   return `<div class="photo-page" style="--c:${t?.color || '#888'}">${t ? crumbs(t, false) : ''}
     <div class="bar"><h2>${esc(p.title)}</h2><div class="tools">
       ${edit ? `<details class="more topic-menu"><summary aria-label="Photo options">⋯</summary><div class="menu">
         <button data-act="rename-photo">Rename</button><button data-act="move-photo">Move to another topic…</button>
         <button class="danger" data-act="delete-photo">Delete photo…</button></div></details>` : ''}
       <button data-act="share">↗ Share</button><button class="dark" data-act="full">⛶ Full screen</button></div></div>
-    <p class="lead">${esc(day(p.added))}${p.mine ? ' · yours, only on this device' : ''}${list.length > 1 ? ` · ${i + 1} of ${list.length} in this topic` : ''}</p>
+    <p class="lead">${esc(day(p.added))}${p.byName ? ` · added by ${esc(p.byName)}` : ''}${p.mine ? ' · yours, only on this device' : ''}${list.length > 1 ? ` · ${i + 1} of ${list.length} in this topic` : ''}</p>
     <div class="shot"><img src="${src(p)}" alt="${esc(p.title)}" data-act="full"></div>
     ${p.notes ? `<section class="notes"><h3>Notes <small>added ${esc(new Date(p.notesAt || Date.now()).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))}</small></h3>${formatNotes(p.notes)}</section>`
       : `<section class="notes none"><p>${p.mine ? 'Notes are only added to the owner’s photos.' : 'No notes yet – they’re added once a week.'}</p></section>`}
@@ -631,7 +647,7 @@ function planActions(actions) {
   const byId = (id) => all().find((t) => t.id === id);
   const name = (id) => byId(id)?.name || '?';
   const keys = {};
-  const newId = (parent) => (!isOwner() || (parent && isMine(parent)) ? rid('my-t') : rid('t-'));
+  const newId = (parent) => (!isMember() || (parent && isMine(parent)) ? rid('my-t') : rid('t-'));
   const child = (parent, n) => all().find((t) => (t.parent || null) === (parent || null) && sameName(t.name, n));
   function topic(ref, { create = false } = {}) {
     const r = cleanRef(ref); if (!r) return null;
@@ -671,6 +687,7 @@ function planActions(actions) {
       keys[String(a.name).trim().toLowerCase()] = id;
       continue;
     }
+    if ((a.type === 'unlock_formula' || a.type === 'lock_formula') && !isOwner()) { lines.push('✕ Only the owner can unlock or lock formulas'); continue; }
     if (a.type === 'unlock_formula' || a.type === 'lock_formula') {
       const want = cleanRef(a.name).toLowerCase();
       const name = FORMULA_NAMES.find((n) => n.toLowerCase() === want) || FORMULA_NAMES.find((n) => n.toLowerCase().includes(want) || want.includes(n.toLowerCase()));
@@ -684,6 +701,7 @@ function planActions(actions) {
     if (/_photo$/.test(a.type)) {
       const id = photo(a.photo);
       if (!id) { lines.push(`✕ Couldn’t find the photo “${cleanRef(a.photo)}”`); continue; }
+      if (!canEditPhoto(P(id))) { lines.push(`✕ Only the owner, or whoever added it, can change ${pt(id)}`); continue; }
       if (a.type === 'move_photo') {
         const to = topic(a.topic, { create: true });
         if (!to) { lines.push(`✕ No topic given for ${pt(id)}`); continue; }
@@ -695,6 +713,7 @@ function planActions(actions) {
     }
     const t = topic(a.topic);
     if (!t) { lines.push(`✕ Couldn’t find the topic “${cleanRef(a.topic)}”`); continue; }
+    if (!canEditTopic(t)) { lines.push(`✕ Only the owner can rename, move or delete topics (${name(t)})`); continue; }
     if (a.type === 'rename_topic') { ops.push({ type: 'rename_topic', topic: t, name: a.name }); lines.push(`Rename ${name(t)} to “${a.name}”`); }
     else if (a.type === 'move_topic') {
       const parent = a.parent ? topic(a.parent, { create: true }) : null;
@@ -750,25 +769,34 @@ $('#bot-msgs').addEventListener('click', (ev) => {
 // ---------- menu ----------
 $('#btn-upload').onclick = () => pickPhotos(current !== HOME && !photoId ? current : null);
 $('#btn-refresh').onclick = () => refresh({ quiet: false });
+// Log in with the class code (a member: can add to the shared collection) or the owner passcode (can change anything).
+async function logIn() {
+  const p = prompt('Enter the class code (or the owner passcode):\n\nWith it you can add photos to the shared collection.'); if (!p) return false;
+  store.set(K.pass, p.trim());
+  await checkWho();
+  if (who && role() && passcode()) {
+    if (!myName()) askName();
+    render(); toast(isOwner() ? 'Logged in as owner ✓' : `Joined ✓ – your photos now go into the shared collection${myName() ? `, as ${myName()}` : ''}`);
+    return true;
+  }
+  store.set(K.pass, ''); await checkWho(); render();
+  toast(who ? 'That code didn’t work.' : 'No internet connection.');
+  return false;
+}
 $('#btn-owner').onclick = async () => {
-  // Log out – e.g. after making changes on someone else's laptop: it goes back to a normal copy.
+  // Log out – e.g. after using someone else's laptop: it goes back to a look-only copy.
   if (passcode()) {
-    if (!confirm('Log out of owner mode on this device?\n\nIt goes back to a normal copy: it still shows your photos and notes, but can’t change them.')) return;
-    store.set(K.pass, ''); chat = []; store.set(K.chat, []);
-    await checkWho(); render(); toast('Logged out ✓ – this is a normal copy again');
+    if (!confirm('Log out on this device?\n\nIt goes back to a look-only copy: it still shows everything, but can’t add or change anything.')) return;
+    store.set(K.pass, ''); store.set(`${KEY}-role`, null); chat = []; store.set(K.chat, []);
+    await checkWho(); render(); toast('Logged out ✓');
     return;
   }
-  const p = prompt('Owner passcode:\n\n(Log out again when you’re done on someone else’s device.)'); if (!p) return;
-  store.set(K.pass, p.trim());
-  // A passcode check that changes nothing (the server checks the passcode first, then finds nothing to do).
-  const { res, data } = await callApi('api/course', { kind: 'design', action: 'check' }, { askPass: false });
-  if (res?.status === 400) { await checkWho(); render(); toast('Logged in as owner ✓ – uploads and changes now go to your shared library'); }
-  else { store.set(K.pass, ''); toast(problem(res, data)); }
+  await logIn();
 };
 $('#btn-device').onclick = async () => {
   await checkWho();
   showDialog(`<div class="dlg-head"><h2 class="grow">This device</h2><button class="link" data-close>✕</button></div><div class="dlg-body">
-    <p><b>${isOwner() ? 'Owner device' : 'Friend’s copy'}</b> – ${isOwner() ? 'uploads and changes are saved to your shared library on GitHub.' : 'you see the owner’s photos; photos you upload stay on this device only.'}</p>
+    <p><b>${isOwner() ? 'Owner' : isMember() ? 'Member (class code)' : 'Look-only copy'}</b> – ${isMember() ? 'your uploads go into the shared collection everyone sees.' : 'you can see everything; log in with the class code to add photos.'}</p>
     <p>AI sorting and helper: <b>${who?.ai && isOwner() ? 'on' : 'off'}</b>${who && !who.ai ? ' (no AI binding)' : ''}. Shared library: <b>${who?.storage ? 'connected' : 'not set up'}</b>.</p>
     ${who ? `<p class="hint">Your internet address: <code>${esc(who.ip)}</code>To lock the AI features to this network, add this to the Worker’s OWNER_IPS secret:<code>${esc(who.suggest)}</code></p>` : '<p class="hint">Offline – can’t check.</p>'}
     </div>`, 'small');

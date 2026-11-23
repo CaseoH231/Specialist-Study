@@ -21,9 +21,29 @@ const LIBRARY = 'data/library.json';
 const cache = () => (typeof caches !== 'undefined' && caches.default) || null;
 const LIB_KEY = 'https://specialist-study.cache/library';
 
-function writeCheck(request, env) {
-  if (!env.GITHUB_TOKEN || !env.APP_PASSCODE) return json({ error: 'not-set-up' }, 503);
-  if (request.headers.get('x-passcode') !== env.APP_PASSCODE) return json({ error: 'passcode' }, 401);
+// Who's writing: the owner (APP_PASSCODE) or a member (SHARE_CODE, the class code). An owner address alone isn't enough.
+function writer(request, env) {
+  if (!env.GITHUB_TOKEN || !env.APP_PASSCODE) return { no: json({ error: 'not-set-up' }, 503) };
+  const code = request.headers.get('x-passcode');
+  if (code === env.APP_PASSCODE) return { role: 'owner' };
+  if (env.SHARE_CODE && code === env.SHARE_CODE) return { role: 'member' };
+  return { no: json({ error: 'passcode' }, 401) };
+}
+const device = (request) => String(request.headers.get('x-device') || '').replace(/[^a-z0-9-]/gi, '').slice(0, 40);
+const byName = (request) => { try { return decodeURIComponent(request.headers.get('x-name') || '').replace(/\s+/g, ' ').trim().slice(0, 40); } catch { return ''; } };
+
+// What a member may do: add photos, topics and dates, and change or remove only the photos and dates they added.
+// (Renaming, moving or deleting topics, and locking/unlocking formulas, are the owner's.)
+function memberMay(lib, ops, dev) {
+  const mine = new Set([...lib.photos.filter((p) => p.by && p.by === dev).map((p) => p.id), ...(lib.events || []).filter((e) => e.by && e.by === dev).map((e) => e.id)]);
+  for (const o of ops) {
+    if (['add_topic', 'add_path'].includes(o.type)) continue;
+    if (o.type === 'add_photo' && o.photo) { mine.add(o.photo.id); continue; }
+    if (o.type === 'add_event' && o.event) { mine.add(o.event.id); continue; }
+    if (['move_photo', 'rename_photo', 'delete_photo'].includes(o.type) && mine.has(o.photo)) continue;
+    if (o.type === 'delete_event' && mine.has(o.event)) continue;
+    return o.type;
+  }
   return null;
 }
 const ghFail = (err) => (err instanceof GitHubError
@@ -48,16 +68,26 @@ async function library(env) {
 }
 
 async function change(request, env) {
-  const no = writeCheck(request, env); if (no) return no;
+  const w = writer(request, env); if (w.no) return w.no;
+  const dev = device(request), name = byName(request);
   let body;
   try { body = await request.json(); } catch { return json({ error: 'bad-request' }, 400); }
   const ops = Array.isArray(body?.ops) ? body.ops.slice(0, 200) : null;
   if (!ops?.length) return json({ error: 'bad-request' }, 400);
+  // Photos and dates remember who added them, so members can change their own later.
+  for (const o of ops) {
+    if (o?.type === 'add_photo' && o.photo) Object.assign(o.photo, { by: dev, byName: name });
+    if (o?.type === 'add_event' && o.event) o.event.by = dev;
+  }
   // Someone else (another device, or the Sunday notes job) may save at the same moment: then GitHub refuses
   // the old version, so fetch the newest one and apply the ops again.
   for (let tries = 0; tries < 4; tries++) {
     try {
       const { sha, lib } = await getLibrary(env);
+      if (w.role === 'member') {
+        const not = memberMay(lib, ops, dev);
+        if (not) return json({ error: 'not-allowed', op: not }, 403);
+      }
       const result = applyOps(lib, structuredClone(ops));
       if (!result.done) return json({ ok: true, library: lib, ...result });
       const what = [...new Set(ops.map((o) => o.type))].join(', ');
@@ -73,7 +103,7 @@ async function change(request, env) {
 }
 
 async function upload(request, env) {
-  const no = writeCheck(request, env); if (no) return no;
+  const w = writer(request, env); if (w.no) return w.no;
   if (Number(request.headers.get('content-length') || 0) > 12e6) return json({ error: 'too-big' }, 413);
   let body;
   try { body = await request.json(); } catch { return json({ error: 'bad-request' }, 400); }
@@ -114,7 +144,7 @@ export async function handleApi(request, env) {
   if (pathname === '/api/assistant') return assistant(request, env);
   if (pathname === '/api/whoami') {
     const a = access(request, env);
-    return json({ ip: a.ip, suggest: a.suggest, owner: a.owner, locked: a.locked, ipLocked: a.ipLocked, hasPasscode: a.hasPasscode,
+    return json({ ip: a.ip, suggest: a.suggest, owner: a.owner, member: a.member, role: a.role, hasShareCode: a.hasShareCode, locked: a.locked, ipLocked: a.ipLocked, hasPasscode: a.hasPasscode,
       ai: !!env.AI, storage: !!env.GITHUB_TOKEN });
   }
   return json({ error: 'not-found' }, 404);

@@ -114,7 +114,8 @@ function applyOne(lib, op, ctx) {
       const want = p.topic === '@path' ? ctx.path : p.topic;
       const topic = T(want) ? want : ensureUnsorted(lib).id;
       lib.photos.push({ id: p.id, topic, title: clean(p.title) || 'Untitled', added: clean(p.added, 30) || new Date().toISOString().slice(0, 10),
-        file: clean(p.file, 120) || `photos/${p.id}.jpg`, w: +p.w || 0, h: +p.h || 0 });
+        file: clean(p.file, 120) || `photos/${p.id}.jpg`, w: +p.w || 0, h: +p.h || 0,
+        ...(p.by ? { by: clean(p.by, 40) } : {}), ...(p.byName ? { byName: clean(p.byName, 40) } : {}) });
       return true;
     }
     case 'move_photo': { const p = P(op.photo); if (!p || !T(op.topic)) return false; p.topic = op.topic; return true; }
@@ -123,7 +124,7 @@ function applyOne(lib, op, ctx) {
       const e = op.event || {};
       lib.events ||= [];
       if (!ID.test(e.id || '') || lib.events.some((x) => x.id === e.id) || !/^\d{4}-\d{2}-\d{2}$/.test(e.date || '') || !clean(e.title)) return false;
-      lib.events.push({ id: e.id, date: e.date, title: clean(e.title, 80), kind: KINDS.includes(e.kind) ? e.kind : 'Other' });
+      lib.events.push({ id: e.id, date: e.date, title: clean(e.title, 80), kind: KINDS.includes(e.kind) ? e.kind : 'Other', ...(e.by ? { by: clean(e.by, 40) } : {}) });
       lib.events.sort((a, b) => a.date.localeCompare(b.date));
       return true;
     }

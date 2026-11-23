@@ -53,6 +53,23 @@ const { fakeGitHub, fakeAI } = require('./fakes.cjs');
   check('a bad GitHub token is reported', (await handleApi(new Request('http://x/api/change', { method: 'POST', body: JSON.stringify({ ops: [{ type: 'rename_topic', topic: 't-c', name: 'x' }] }), headers: { 'x-passcode': 'pw' } }), { ...env, GITHUB_TOKEN: 'wrong' })).status === 502);
   check('nothing to save to without the secrets', (await handleApi(new Request('http://x/api/change', { method: 'POST', body: '{}', headers: { 'x-passcode': 'pw' } }), { AI: ai })).status === 503);
 
+  // Members (the class code): add to the shared collection, change only their own photos.
+  const menv = { ...env, SHARE_CODE: 'class' };
+  const mreq = (body, dev = 'd-sam') => handleApi(new Request('http://x/api/change', { method: 'POST', body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json', 'x-passcode': 'class', 'x-device': dev, 'x-name': encodeURIComponent('Sam Ø') } }), menv);
+  const up = await handleApi(new Request('http://x/api/upload', { method: 'POST', body: JSON.stringify({ id: 'p-sam0001', data: jpeg }), headers: { 'x-passcode': 'class' } }), menv);
+  const addR = await mreq({ ops: [{ type: 'add_path', path: ['Vectors'], ids: ['t-vec'] }, { type: 'add_photo', photo: { id: 'p-sam0001', topic: '@path', title: 'Sam’s vectors' } }] });
+  const samP = JSON.parse(gh.text('data/library.json')).photos.find((p) => p.id === 'p-sam0001');
+  check('members can upload and add photos and topics, which remember who added them', up.status === 200 && addR.status === 200 && samP?.by === 'd-sam' && samP.byName === 'Sam Ø');
+  check('members can rename their own photo', (await mreq({ ops: [{ type: 'rename_photo', photo: 'p-sam0001', title: 'Vectors Q1' }] })).status === 200);
+  check('members can’t change someone else’s photo', (await mreq({ ops: [{ type: 'delete_photo', photo: 'p-sam0001' }] }, 'd-other')).status === 403
+    && (await mreq({ ops: [{ type: 'delete_photo', photo: 'p-aaaaaa1' }] })).status === 403);
+  check('members can’t rename topics or unlock formulas', (await mreq({ ops: [{ type: 'rename_topic', topic: 't-vec', name: 'x' }] })).status === 403
+    && (await mreq({ ops: [{ type: 'unlock_formula', name: 'Modulus' }] })).status === 403);
+  check('without a code nothing can be added', (await handleApi(new Request('http://x/api/change', { method: 'POST', body: JSON.stringify({ ops: [{ type: 'add_topic', id: 't-zz', name: 'z' }] }) }), menv)).status === 401);
+  const wm = await (await handleApi(new Request('http://x/api/whoami', { headers: { 'x-passcode': 'class' } }), menv)).json();
+  check('whoami knows a member', wm.role === 'member' && wm.member && !wm.owner && wm.hasShareCode);
+
   // Helper.
   const h = await (await req('/api/assistant', { body: { messages: [{ role: 'user', content: 'move it' }], library: 'x' }, pass: 'pw' })).json();
   check('the helper suggests changes (unknown kinds dropped)', h.reply === 'Moving it.' && h.actions.length === 1 && h.actions[0].type === 'move_photo');
