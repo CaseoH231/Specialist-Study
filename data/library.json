@@ -1,6 +1,6 @@
 {
  "version": 1,
- "updatedAt": "2026-11-23T00:24:17.842Z",
+ "updatedAt": "2026-11-23T00:24:39.767Z",
  "topics": [
   {
    "id": "t-mwojd6uir0aw",
@@ -90,17 +90,6 @@
    "w": 2000,
    "h": 1500,
    "by": "d-mwsirsj5stxu",
-   "byName": "test"
-  },
-  {
-   "id": "p-mwsiwog2yvab",
-   "topic": "t-mwsit0lxz23m",
-   "title": "Screenshot 2026-09-14 at 11.52.01 am",
-   "added": "2026-11-23",
-   "file": "photos/p-mwsiwog2yvab.jpg",
-   "w": 2000,
-   "h": 1119,
-   "by": "d-mwsisivzqj7h",
    "byName": "test"
   }
  ],
